@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">PriceComparisonApp</string>
+    <string name="search">search</string>
+    <string name="logOut">log out</string>
+    <string name="searchItems">Search Items</string>
+    <string-array name="cities">
+        <item>תל אביב</item>
+        <item>אשקלון</item>
+        <item>לוד</item>
+    </string-array>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="productName">שם המוצר</string>
+</resources>
