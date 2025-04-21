@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <!-- Use Material Components Theme -->
     <style name="Theme.PriceComparisonApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme if needed -->
+
     </style>
 
 </resources>

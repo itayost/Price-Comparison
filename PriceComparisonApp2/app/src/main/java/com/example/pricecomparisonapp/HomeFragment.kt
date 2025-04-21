@@ -35,15 +35,17 @@ class HomeFragment : Fragment() {
     private lateinit var itemAdapter: ItemAdapter
     private lateinit var quantitySpinner: Spinner
     private lateinit var textViewTotalPrice: TextView
+    private lateinit var textViewBestStore: TextView
     private lateinit var textViewSearchedItemPrice: TextView
     private lateinit var textViewCheckItemPrice: AutoCompleteTextView
+    private lateinit var emptyCartView: LinearLayout
     private lateinit var buttonSaveCart: Button
     private lateinit var spinnerSavedCarts: Spinner
     private lateinit var btnSelectCart: Button
     private val selectedItems = mutableListOf<Item>()
     private val itemsList = mutableListOf<Item>()
     private val client = OkHttpClient()
-    private val baseUrl = "http://192.168.50.143:8000" // Change to local IP
+    private val baseUrl = "http://172.20.28.72:8000" // Change to local IP
     private var savedCarts: List<SavedCart> = listOf()
     private var citiesList = listOf<String>()
 
@@ -67,13 +69,44 @@ class HomeFragment : Fragment() {
         recyclerViewResults = view.findViewById(R.id.recyclerViewResults)
         quantitySpinner = view.findViewById(R.id.quantitySpinner)
         textViewTotalPrice = view.findViewById(R.id.textViewTotalPrice)
+        textViewBestStore = view.findViewById(R.id.textViewBestStore)
         textViewSearchedItemPrice = view.findViewById(R.id.textViewSearchedItemPrice)
         textViewCheckItemPrice = view.findViewById(R.id.autoCompleteTextView)
         buttonSaveCart = view.findViewById(R.id.buttonSaveCart)
         spinnerSavedCarts = view.findViewById(R.id.spinnerSavedCarts)
         btnSelectCart = view.findViewById(R.id.btnSelectCart)
+        emptyCartView = view.findViewById(R.id.emptyCartView)
         val btnLogout = view.findViewById<Button>(R.id.btnLogout)
+        val textViewCurrentCity = view.findViewById<TextView>(R.id.textViewCurrentCity)
 
+        // Get the shared CartViewModel from MainActivity
+        val cartViewModel = (activity as MainActivity).getCartViewModel()
+        
+        // Observe cart items changes
+        cartViewModel.cartItems.observe(viewLifecycleOwner) { items ->
+            // Update UI with the new cart items
+            selectedItems.clear()
+            selectedItems.addAll(items)
+            itemAdapter.notifyDataSetChanged()
+            updateCartVisibility()
+            
+            // Update total price
+            val totalPrice = items.sumOf { it.price }
+            textViewTotalPrice.text = "מחיר כולל: ₪$totalPrice"
+        }
+        
+        // Observe cheapest store information
+        cartViewModel.cheapestStore.observe(viewLifecycleOwner) { store ->
+            if (store.isNotEmpty()) {
+                val storeInfo = when (store) {
+                    "shufersal" -> "שופרסל"
+                    "victory" -> "ויקטורי"
+                    else -> store
+                }
+                textViewBestStore.text = "המקום הזול ביותר: $storeInfo"
+            }
+        }
+        
         btnLogout.setOnClickListener {
             logout()
         }
@@ -84,6 +117,25 @@ class HomeFragment : Fragment() {
             showItemDetailsDialog(selectedItem)
         }
         recyclerViewResults.adapter = itemAdapter
+        
+        // Show empty cart message if the cart is empty
+        updateCartVisibility()
+        
+        // Get the city from shared preferences instead of using spinner
+        val sharedPreferences = requireActivity().getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
+        val savedLocation = sharedPreferences.getString("location", "")
+        textViewCurrentCity.text = "העיר הנוכחית: $savedLocation"
+    }
+    
+    // Helper method to show/hide empty cart view
+    private fun updateCartVisibility() {
+        if (selectedItems.isEmpty()) {
+            recyclerViewResults.visibility = View.GONE
+            emptyCartView.visibility = View.VISIBLE
+        } else {
+            recyclerViewResults.visibility = View.VISIBLE
+            emptyCartView.visibility = View.GONE
+        }
 
         // Initialize quantity spinner
         val quantityList = (1..20).map { it.toString() }
@@ -99,23 +151,33 @@ class HomeFragment : Fragment() {
             val quantity = quantitySpinner.selectedItem.toString().toInt()
 
             if (itemName.isNotEmpty()) {
-                val selectedLocation = spinnerLocation.selectedItem.toString()
-                fetchItemPrice(selectedLocation, itemName) { item ->
-                    if (item != null) {
-                        val store_id = ""
-                        val itemWithQuantity = Item(
-                            item.item_name,
-                            quantity,
-                            item.price * quantity,
-                            store_id = store_id
-                        )
-                        selectedItems.add(itemWithQuantity)
-                        editTextAddItem.text.clear()
-                        textViewSearchedItemPrice.text = ""
-                        textViewSearchedItemPrice.visibility = View.INVISIBLE
-                        itemAdapter.notifyDataSetChanged()
-                        Toast.makeText(requireContext(), "מוצר נוסף לרשימה", Toast.LENGTH_SHORT).show()
+                // Get the location from SharedPreferences
+                val sharedPreferences = requireActivity().getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
+                val selectedLocation = sharedPreferences.getString("location", "") ?: ""
+                
+                if (selectedLocation.isNotEmpty()) {
+                    fetchItemPrice(selectedLocation, itemName) { item ->
+                        if (item != null) {
+                            val store_id = ""
+                            val itemWithQuantity = Item(
+                                item.item_name,
+                                quantity,
+                                item.price * quantity,
+                                store_id = store_id
+                            )
+                            
+                            // Add the item to the shared CartViewModel
+                            (activity as MainActivity).getCartViewModel().addToCart(itemWithQuantity)
+                            
+                            editTextAddItem.text.clear()
+                            textViewSearchedItemPrice.text = ""
+                            textViewSearchedItemPrice.visibility = View.GONE
+                            
+                            Toast.makeText(requireContext(), "מוצר נוסף לעגלה", Toast.LENGTH_SHORT).show()
+                        }
                     }
+                } else {
+                    Toast.makeText(requireContext(), "אנא בחר עיר בהגדרות תחילה", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -123,7 +185,15 @@ class HomeFragment : Fragment() {
         // Compare Prices button
         buttonComparePrices.setOnClickListener {
             if (selectedItems.isNotEmpty()) {
-                val selectedLocation = spinnerLocation.selectedItem.toString()
+                // Get the location from SharedPreferences instead of spinnerLocation
+                val sharedPreferences = requireActivity().getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
+                val selectedLocation = sharedPreferences.getString("location", "") ?: ""
+                
+                if (selectedLocation.isEmpty()) {
+                    Toast.makeText(requireContext(), "אנא בחר עיר בהגדרות תחילה", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                
                 fetchCheapestCart(selectedLocation, selectedItems)
             } else {
                 Toast.makeText(requireContext(), "נא להוסיף מוצרים קודם", Toast.LENGTH_SHORT).show()
@@ -136,14 +206,15 @@ class HomeFragment : Fragment() {
             Log.d("חפש", "פריט שהוכנס: '$itemName'")
 
             if (itemName.isNotEmpty()) {
-                // Add null check for spinnerLocation.selectedItem
-                val selectedItem = spinnerLocation.selectedItem
-                if (selectedItem == null) {
-                    Toast.makeText(requireContext(), "אנא בחר מיקום תחילה", Toast.LENGTH_SHORT).show()
+                // Get the location from SharedPreferences
+                val sharedPreferences = requireActivity().getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
+                val selectedLocation = sharedPreferences.getString("location", "") ?: ""
+                
+                if (selectedLocation.isEmpty()) {
+                    Toast.makeText(requireContext(), "אנא בחר עיר בהגדרות תחילה", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
-                val selectedLocation = selectedItem.toString()
                 fetchItemsPrice(selectedLocation, itemName) { items ->
                     activity?.runOnUiThread {
                         if (items.isNotEmpty()) {
@@ -189,31 +260,22 @@ class HomeFragment : Fragment() {
                     return@setOnClickListener
                 }
 
-                // Clear current items list and replace it with items from the selected cart
-                itemsList.clear()
-                itemsList.addAll(selectedCart.items)
-                selectedItems.clear()
-                selectedItems.addAll(itemsList)
-
                 // Log selections for debugging
-                Log.d("ItemsList", "מוצרים ברשימה: ${itemsList}")
                 Log.d("SelectedCartItems", "מוצרים בעגלה שנבחרה: ${selectedCart.items}")
+
+                // Get the CartViewModel
+                val cartViewModel = (activity as MainActivity).getCartViewModel()
+                
+                // Clear the current cart and add all items from the selected cart
+                cartViewModel.clearCart()
+                selectedCart.items.forEach { item ->
+                    cartViewModel.addToCart(item)
+                }
 
                 // Update UI
                 editTextAddItem.text.clear()
-                itemAdapter.notifyDataSetChanged()
-
-                // Calculate and display total price
-                try {
-                    val totalPrice = selectedCart.items.sumOf { it.price }
-                    textViewTotalPrice.text = "מחיר כולל: $totalPrice"
-                    textViewTotalPrice.visibility = View.VISIBLE
-                } catch (e: Exception) {
-                    Log.e("PriceError", "Error calculating price: ${e.message}")
-                    textViewTotalPrice.text = "מחיר כולל: לא זמין"
-                    textViewTotalPrice.visibility = View.VISIBLE
-                }
-
+                textViewBestStore.text = "המקום הזול ביותר: לא חושב עדיין"
+                
                 Toast.makeText(requireContext(), "עגלה '${selectedCart.cart_name}' נבחרה!", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(requireContext(), "לא נבחרה עגלה!", Toast.LENGTH_SHORT).show()
@@ -278,11 +340,14 @@ class HomeFragment : Fragment() {
         val email = sharedPreferences.getString("user_email", "") ?: ""
 
         if (email.isNotEmpty()) {
+            // Get cart items from the shared CartViewModel
+            val cartItems = (activity as MainActivity).getCartViewModel().getCartAsList()
+            
             val url = "$baseUrl/savecart"
             val cartData = JsonObject().apply {
                 addProperty("email", email)
                 addProperty("cart_name", listName)
-                add("items", Gson().toJsonTree(selectedItems))
+                add("items", Gson().toJsonTree(cartItems))
             }
 
             val requestBody = RequestBody.create(
@@ -323,9 +388,12 @@ class HomeFragment : Fragment() {
     }
 
     private fun fetchSavedCarts() {
-        val sharedPreferences = requireActivity().getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-        val email = sharedPreferences.getString("user_email", "") ?: ""
-        val city = spinnerLocation.selectedItem?.toString() ?: "Afula"
+        val userPrefs = requireActivity().getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+        val email = userPrefs.getString("user_email", "") ?: ""
+        
+        // Get city from app preferences instead of spinner
+        val appPrefs = requireActivity().getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
+        val city = appPrefs.getString("location", "") ?: "Afula"
         Log.d("DEBUG", "Email: $email, City: $city")
 
         if (email.isNotEmpty() && city.isNotEmpty()) {
@@ -496,44 +564,29 @@ class HomeFragment : Fragment() {
     }
 
     private fun fetchCheapestCart(city: String, items: List<Item>) {
-        val requestBody = Gson().toJson(mapOf("city" to city, "items" to items))
-
-        val request = Request.Builder()
-            .url("$baseUrl/cheapest-cart-all-chains")
-            .post(RequestBody.create(MediaType.parse("application/json"), requestBody))
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onResponse(call: Call, response: Response) {
-                if (response.isSuccessful) {
-                    val responseData = response.body()?.string()
-                    val cartResponse = Gson().fromJson(responseData, CheapestCartResponse::class.java)
-
-                    activity?.runOnUiThread {
-                        itemsList.clear()
-                        itemsList.addAll(cartResponse.items)
-                        itemAdapter.notifyDataSetChanged()
-
-                        textViewTotalPrice.text = "מחיר הכי טוב ב:  ${cartResponse.chain}: ${cartResponse.total_price}"
-                        textViewTotalPrice.visibility = View.VISIBLE
-                        textViewSearchedItemPrice.text = ""
-                        textViewSearchedItemPrice.visibility = View.INVISIBLE
-                        Toast.makeText(requireContext(), "מחיר הכי טוב ב:  ${cartResponse.chain}: ${cartResponse.total_price}", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "לא הצלחנו למצוא את המחיר הכי זול", Toast.LENGTH_SHORT).show()
-                    }
-                }
+        // Use the method in MainActivity which already updates the CartViewModel
+        (activity as MainActivity).fetchCheapestCart(city, items) { chain, totalPrice ->
+            // This callback runs on the UI thread
+            val storeInfo = when (chain) {
+                "shufersal" -> "שופרסל"
+                "victory" -> "ויקטורי"
+                else -> chain
             }
-
-            override fun onFailure(call: Call, e: IOException) {
-                activity?.runOnUiThread {
-                    Log.e("API_ERROR", "Failed to connect to API: ${e.message}")
-                    Toast.makeText(requireContext(), "Failed to connect to API.", Toast.LENGTH_SHORT).show()
-                }
+            
+            if (chain.isNotEmpty()) {
+                // Show the store name with store ID if available
+                textViewBestStore.text = "המקום הזול ביותר: $storeInfo"
+                
+                // Clear any search results
+                textViewSearchedItemPrice.text = ""
+                textViewSearchedItemPrice.visibility = View.GONE
+                
+                // Show a toast notification
+                Toast.makeText(requireContext(), "מצאנו את המקום הזול ביותר!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), "לא הצלחנו למצוא את המחיר הכי זול", Toast.LENGTH_SHORT).show()
             }
-        })
+        }
     }
 
     private fun fetchItemsPrice(city: String, itemName: String, onPriceFetched: (List<Item>) -> Unit) {

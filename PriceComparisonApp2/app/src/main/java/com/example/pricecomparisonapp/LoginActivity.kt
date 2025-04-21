@@ -9,7 +9,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.gson.Gson
 import okhttp3.*
 import java.io.IOException
@@ -21,13 +24,19 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var buttonSubmit: Button
     private lateinit var textViewToggle: TextView
     private val client = OkHttpClient()
-    private val baseUrl = "http://192.168.50.143:8000" // Change to local IP
+    private val baseUrl = "http://172.20.28.72:8000" // Change to local IP
     private var isLoginMode = true
     private lateinit var sharedPreferences: SharedPreferences
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContentView(R.layout.activity_login)
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.login)) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
 
         sharedPreferences = getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
 

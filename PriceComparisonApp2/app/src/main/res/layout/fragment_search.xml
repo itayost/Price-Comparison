@@ -31,20 +31,30 @@
                 android:padding="16dp">
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/searchItems"
-                    android:textSize="18sp"
+                    android:text="חיפוש מוצרים"
+                    android:textSize="20sp"
                     android:textStyle="bold"
                     android:textColor="@color/colorPrimary"
+                    android:gravity="center"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="הזן שם מוצר לחיפוש"
+                    android:textSize="16sp"
+                    android:gravity="center"
                     android:layout_marginBottom="8dp" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="@string/searchItems"
+                    android:hint="שם מוצר לחיפוש"
                     style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-                    app:endIconMode="clear_text">
+                    app:endIconMode="clear_text"
+                    app:startIconDrawable="@android:drawable/ic_menu_search">
 
                     <AutoCompleteTextView
                         android:id="@+id/autoCompleteTextView"
@@ -55,39 +65,35 @@
                         android:inputType="text" />
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonSearch"
-                    android:layout_width="match_parent"
+                <LinearLayout
+                    android:layout_width="match_parent" 
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/search"
-                    android:textColor="@android:color/white"
-                    app:backgroundTint="@color/colorPrimary"
-                    app:cornerRadius="8dp" />
-
-                <androidx.cardview.widget.CardView
-                    android:id="@+id/searchResultsCardView"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    app:cardCornerRadius="8dp"
-                    app:cardElevation="2dp"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:id="@+id/textViewSearchedItemPrice"
-                        android:layout_width="match_parent"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp">
+                    
+                    <Spinner
+                        android:id="@+id/spinnerLocation"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:background="@drawable/price_result_background"
-                        android:padding="12dp"
-                        android:textSize="14sp" />
-                </androidx.cardview.widget.CardView>
+                        android:layout_weight="1" />
+                        
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/buttonSearch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="חפש"
+                        android:textColor="@android:color/white"
+                        app:backgroundTint="@color/colorPrimary"
+                        app:cornerRadius="8dp" />
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Cart Management Card -->
+        <!-- Results Card -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cartManagementCard"
+            android:id="@+id/searchResultsCardView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="16dp"
@@ -100,195 +106,155 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
+                android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/textViewSearchResultsTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@color/colorPrimary"
+                    android:padding="14dp"
+                    android:text="תוצאות חיפוש"
+                    android:textColor="@android:color/white"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:elevation="2dp"
+                    android:gravity="center" />
+
+                <!-- Loading indicator -->
+                <ProgressBar
+                    android:id="@+id/searchProgressBar"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="צור רשימת קניות"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/colorPrimary"
-                    android:layout_marginBottom="8dp" />
-
+                    android:layout_gravity="center"
+                    android:layout_margin="16dp"
+                    android:visibility="gone" />
+                    
+                <!-- Empty results view -->
                 <LinearLayout
+                    android:id="@+id/emptyResultsView"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:hint="הוסף מוצר לרשימה"
-                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/editTextAddItem"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="text" />
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.textfield.TextInputLayout
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="24dp"
+                    android:visibility="gone">
+                    
+                    <ImageView
+                        android:layout_width="64dp"
+                        android:layout_height="64dp"
+                        android:src="@android:drawable/ic_menu_search"
+                        android:tint="@color/gray_300"
+                        android:layout_marginBottom="16dp" />
+                        
+                    <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:hint="כמות"
-                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
-
-                        <Spinner
-                            android:id="@+id/quantitySpinner"
-                            android:layout_width="70dp"
-                            android:layout_height="match_parent"
-                            android:background="@null" />
-                    </com.google.android.material.textfield.TextInputLayout>
+                        android:text="לא נמצאו תוצאות"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/gray_500" />
+                        
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="נסה חיפוש אחר או בחר עיר אחרת"
+                        android:textSize="14sp"
+                        android:textColor="@color/gray_500"
+                        android:layout_marginTop="4dp" />
                 </LinearLayout>
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonAddItem"
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerViewSearchResults"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="הוסף מוצר"
-                    android:textColor="@android:color/white"
-                    app:backgroundTint="@color/colorAccent"
-                    app:cornerRadius="8dp"
-                    app:icon="@drawable/ic_add"
-                    app:iconGravity="textStart" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonComparePrices"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="השווה מחיר סופי"
-                    android:textColor="@android:color/white"
-                    app:backgroundTint="@color/colorPrimary"
-                    app:cornerRadius="8dp" />
+                    android:minHeight="300dp"
+                    android:clipToPadding="false"
+                    android:padding="8dp"
+                    android:scrollbars="vertical" />
 
                 <TextView
-                    android:id="@+id/textViewTotalPrice"
+                    android:id="@+id/textViewSearchedItemPrice"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/total_price_background"
+                    android:background="@drawable/price_result_background"
                     android:padding="12dp"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:gravity="center"
+                    android:textSize="14sp"
                     android:visibility="gone" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Results Card -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/resultsCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="16dp"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="4dp"
-            app:layout_constraintEnd_toEndOf="parent"
+        <!-- Invisible fields for backward compatibility -->
+        <TextView
+            android:id="@+id/textViewTotalPrice"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/cartManagementCard">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="רשימת מוצרים"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/colorPrimary"
-                    android:layout_marginBottom="8dp" />
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/recyclerViewResults"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:minHeight="200dp"
-                    android:clipToPadding="false"
-                    android:scrollbars="vertical" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Saved Carts Card -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/savedCartsCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="16dp"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="4dp"
-            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <EditText
+            android:id="@+id/editTextAddItem"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/resultsCard">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="עגלות שמורות"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/colorPrimary"
-                    android:layout_marginBottom="8dp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:hint="בחר עגלה שמורה"
-                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
-
-                        <Spinner
-                            android:id="@+id/spinnerSavedCarts"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:background="@null" />
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSelectCart"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="בחר"
-                        android:textColor="@android:color/white"
-                        app:backgroundTint="@color/colorPrimary"
-                        app:cornerRadius="8dp" />
-                </LinearLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonSaveCart"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="שמור עגלה נוכחית"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    app:strokeColor="@color/colorPrimary"
-                    app:cornerRadius="8dp"
-                    app:icon="@drawable/ic_save"
-                    app:iconGravity="textStart" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <Button
+            android:id="@+id/buttonAddItem"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <Button
+            android:id="@+id/buttonComparePrices"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <Spinner
+            android:id="@+id/quantitySpinner"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerViewResults"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <Spinner
+            android:id="@+id/spinnerSavedCarts"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <Button
+            android:id="@+id/btnSelectCart"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+            
+        <Button
+            android:id="@+id/buttonSaveCart"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </androidx.core.widget.NestedScrollView>

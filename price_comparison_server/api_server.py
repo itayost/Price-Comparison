@@ -291,12 +291,23 @@ def get_cheapest_cart_all_chains(cart_request: CartRequest):
 def get_prices_by_item_and_city(city: str, item_name: str):
     results = []
     
+    # Log the search request
+    print(f"Searching for '{item_name}' in city '{city}'")
+    
+    # Special case handling for specific searches
+    specific_search_cases = {
+        "במ": ["במבה", "ביסלי במבה", "חטיף במבה"],
+        "ביס": ["ביסלי", "ביסלים"],
+        "שוק": ["שוקולד", "שוקו"]
+    }
+    
     # Search through all supported chains
     for chain_name, db_name in DBS.items():
         city_path = os.path.join(db_name, city)
         
         # Skip if city doesn't exist in this chain
         if not os.path.exists(city_path):
+            print(f"City '{city}' not found in chain '{chain_name}'")
             continue
             
         # Search through all store DBs in the city
@@ -308,32 +319,133 @@ def get_prices_by_item_and_city(city: str, item_name: str):
                     conn = get_db_connection(chain_name, city, snif_key)
                     cursor = conn.cursor()
                     
-                    cursor.execute(""" 
-                        SELECT snif_key, item_name, item_price, timestamp 
-                        FROM prices 
-                        WHERE item_name LIKE ? 
-                        ORDER BY timestamp DESC
-                        LIMIT 1
-                    """, (f'%{item_name}%',))
+                    # Add specific search terms for common Hebrew searches
+                    search_patterns = []
                     
-                    rows = cursor.fetchall()
+                    # Add special case patterns if this is a known search term
+                    if item_name in specific_search_cases:
+                        # Add exact common product searches for this term
+                        for product in specific_search_cases[item_name]:
+                            search_patterns.append(f'{product}%')  # Products starting with the common term
+                        
+                        print(f"Added special case patterns for '{item_name}'")
+                    
+                    # Then add the standard patterns
+                    search_patterns.extend([
+                        f'{item_name}%',                 # Starts with match (highest priority)
+                        f' {item_name} ',                # Standalone word
+                        f' {item_name}%',                # Word at beginning
+                        f'%{item_name}%',                # Basic 'contains' match (lower priority)
+                    ])
+                    
+                    # Add transliteration mappings for common Hebrew products
+                    transliterations = {
+                        'bamba': 'במבה',
+                        'bisli': 'ביסלי',
+                        'milk': 'חלב',
+                        'water': 'מים',
+                        'bread': 'לחם',
+                        'eggs': 'ביצים',
+                        'cheese': 'גבינה',
+                        'rice': 'אורז',
+                        'sugar': 'סוכר',
+                        'salt': 'מלח',
+                        'chicken': 'עוף',
+                        'beef': 'בקר',
+                        'fish': 'דג',
+                        'vegetable': 'ירק',
+                        'fruit': 'פרי',
+                        'apple': 'תפוח',
+                        'banana': 'בננה',
+                        'orange': 'תפוז',
+                        'tomato': 'עגבניה',
+                        'cucumber': 'מלפפון',
+                        'onion': 'בצל',
+                        'potato': 'תפוח אדמה',
+                        'carrot': 'גזר',
+                        'chocolate': 'שוקולד'
+                    }
+                    
+                    # Add Hebrew equivalents to search patterns if the search term is in English
+                    if item_name.lower() in transliterations:
+                        hebrew_term = transliterations[item_name.lower()]
+                        search_patterns.extend([
+                            f'{hebrew_term}%',             # Starts with Hebrew equivalent (high priority)
+                            f'%{hebrew_term}%'            # Contains Hebrew equivalent
+                        ])
+                        print(f"Added Hebrew transliteration '{hebrew_term}' for '{item_name}'")
+                    
+                    # Try different search patterns
+                    for pattern in search_patterns:
+                        cursor.execute(""" 
+                            SELECT snif_key, item_name, item_price, timestamp 
+                            FROM prices 
+                            WHERE item_name LIKE ? 
+                            ORDER BY timestamp DESC
+                            LIMIT 50
+                        """, (pattern,))
+                        
+                        rows = cursor.fetchall()
+                        
+                        # If we found matches, add them and continue with other patterns to get more results
+                        if rows:
+                            for row in rows:
+                                # Check if this item is already in results (avoid duplicates)
+                                item_name = row['item_name']
+                                if not any(r['item_name'] == item_name for r in results):
+                                    results.append({
+                                        "chain": chain_name,
+                                        "store_id": snif_key,
+                                        "item_name": item_name,
+                                        "price": row['item_price'],
+                                        "last_updated": row['timestamp']
+                                    })
+                    
                     conn.close()
-                    
-                    for row in rows:
-                        results.append({
-                            "chain": chain_name,
-                            "store_id": snif_key,
-                            "item_name": row['item_name'],
-                            "price": row['item_price'],
-                            "last_updated": row['timestamp']
-                        })
                         
                 except sqlite3.Error as e:
+                    print(f"Database error when searching in {chain_name}/{city}/{snif_key}: {str(e)}")
                     continue
     
     if not results:
+        print(f"No results found for '{item_name}' in '{city}'")
         raise HTTPException(status_code=404, detail=f"No prices found for {item_name} in {city}")
-    return results
+    
+    # Special case handling for common searches
+    if item_name in specific_search_cases:
+        # Move specific items to the top of results
+        priority_items = specific_search_cases[item_name]
+        
+        # Function to calculate item priority
+        def get_item_priority(item):
+            item_name_lower = item['item_name'].lower()
+            
+            # Check if this item exactly matches any of our priority items
+            for i, priority_item in enumerate(priority_items):
+                if item_name_lower.startswith(priority_item.lower()):
+                    return i  # Return index as priority (lower is better)
+                
+            # Otherwise check regular priority rules
+            if item_name_lower.startswith(item_name.lower()):
+                return len(priority_items)  # After priority items
+            elif any(word.lower().startswith(item_name.lower()) for word in item_name_lower.split()):
+                return len(priority_items) + 1
+            else:
+                return len(priority_items) + 2
+        
+        # Sort with special handling
+        sorted_results = sorted(results, key=get_item_priority)
+    else:
+        # Standard sorting for other searches
+        sorted_results = sorted(results, key=lambda x: (
+            0 if x['item_name'].lower().startswith(item_name.lower()) else
+            1 if any(word.lower().startswith(item_name.lower()) for word in x['item_name'].split()) else
+            2 if item_name.lower() in x['item_name'].lower() else
+            3
+        ))
+    
+    print(f"Found {len(sorted_results)} results for '{item_name}' in '{city}'")
+    return sorted_results
 
 
 # Add a new table for storing user carts

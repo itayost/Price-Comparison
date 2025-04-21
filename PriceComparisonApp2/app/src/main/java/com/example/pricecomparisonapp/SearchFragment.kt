@@ -1,9 +1,6 @@
 package com.example.pricecomparisonapp
 
-import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.content.Context
-import android.graphics.Typeface
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -12,593 +9,673 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.cardview.widget.CardView
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.gson.Gson
 import com.google.gson.JsonArray
-import com.google.gson.JsonObject
-import com.google.gson.reflect.TypeToken
 import okhttp3.*
 import java.io.IOException
 
 class SearchFragment : Fragment() {
 
+    // UI Elements
+    private lateinit var searchBar: AutoCompleteTextView
+    private lateinit var searchButton: Button
     private lateinit var spinnerLocation: Spinner
-    private lateinit var editTextAddItem: EditText
-    private lateinit var buttonAddItem: Button
-    private lateinit var buttonComparePrices: Button
-    private lateinit var buttonSearch: Button
-    private lateinit var recyclerViewResults: RecyclerView
-    private lateinit var itemAdapter: ItemAdapter
-    private lateinit var quantitySpinner: Spinner
-    private lateinit var textViewTotalPrice: TextView
-    private lateinit var textViewSearchedItemPrice: TextView
+    private lateinit var recyclerViewSearchResults: RecyclerView
     private lateinit var searchResultsCardView: CardView
-    private lateinit var autoCompleteTextView: AutoCompleteTextView
-    private lateinit var buttonSaveCart: Button
-    private lateinit var spinnerSavedCarts: Spinner
-    private lateinit var btnSelectCart: Button
-
-    private val selectedItems = mutableListOf<Item>()
-    private val itemsList = mutableListOf<Item>()
+    private lateinit var searchProgressBar: ProgressBar
+    private lateinit var emptyResultsView: LinearLayout
+    private lateinit var textViewSearchResultsTitle: TextView
+    
+    // Data - improved categories with multiple search keywords for each
+    private val categories = listOf(
+        CategoryItem("חלב ומוצרי חלב", listOf("חלב", "גבינה", "יוגורט", "קוטג", "שמנת", "חמאה")),
+        CategoryItem("לחם ומאפים", listOf("לחם", "פיתה", "לחמנייה", "בגט", "לחמניה", "אפיה", "מאפה")),
+        CategoryItem("בשר ועוף", listOf("בשר", "עוף", "בקר", "הודו", "שניצל", "סטייק", "חזה", "פרגית")),
+        CategoryItem("דגים וים", listOf("דג", "דגים", "טונה", "סלמון", "נסיכה", "בורי", "פילה")),
+        CategoryItem("ירקות", listOf("ירקות", "עגבני", "מלפפון", "גזר", "בצל", "פלפל", "חציל", "חסה", "כרוב")),
+        CategoryItem("פירות", listOf("פירות", "תפוח", "בננה", "תפוז", "אבטיח", "מלון", "אגס", "ענב", "תות")),
+        CategoryItem("שתייה", listOf("שתיה", "מים", "קולה", "סודה", "מיץ", "חלב", "משקה", "בירה", "יין")),
+        CategoryItem("חטיפים וממתקים", listOf("חטיף", "במבה", "ביסלי", "שוקולד", "ופלים", "עוגיות", "תפוצ'יפס", "ממתק", "סוכריות")),
+        CategoryItem("סלטים ומוכנים", listOf("סלט", "חומוס", "טחינה", "מטבוחה", "חציל", "מוכן")),
+        CategoryItem("שימורים", listOf("שימור", "פחית", "קופסה", "טונה", "זיתים", "חומוס", "מלפפון", "תירס")),
+        CategoryItem("שמנים ורטבים", listOf("שמן", "רוטב", "קטשופ", "מיונז", "חרדל", "טחינה", "חומץ")),
+        CategoryItem("קפה ותה", listOf("קפה", "תה", "נס", "קפה", "אספרסו", "תיון", "סוכר", "ממתיק")),
+        CategoryItem("דגנים וקטניות", listOf("אורז", "פסטה", "קטניות", "פתיתים", "בורגול", "קינואה", "עדשים", "שעועית", "קמח")),
+        CategoryItem("מוצרי ניקיון", listOf("ניקוי", "אקונומיקה", "מנקה", "סבון", "מרכך", "אבקה", "כביסה", "שטיפה")),
+        CategoryItem("טואלטיקה", listOf("שמפו", "מרכך", "סבון", "דאודורנט", "קרם", "משחת שיניים", "מברשת", "טישו")),
+        CategoryItem("מוצרי תינוקות", listOf("תינוק", "חיתול", "מגבון", "טיטול", "בקבוק", "מטרנה", "מזון", "מוצץ")),
+        CategoryItem("קפואים", listOf("קפוא", "שלגון", "גלידה", "פיצה", "בצק", "ירק", "קפוא")),
+        CategoryItem("כל המוצרים", "all")
+    )
+    
+    private val items = mutableListOf<Item>()
+    private val baseUrl = "http://172.20.28.72:8000"
     private val client = OkHttpClient()
-    private var baseUrl = "http://192.168.50.143:8000" // Match with MainActivity
-    private var savedCarts: List<SavedCart> = listOf()
-    private var citiesList = listOf<String>()
-
+    private var currentMode = Mode.CATEGORIES // Start in categories mode
+    private var currentCategory: String? = null
+    
+    // Enum to keep track of current view mode
+    private enum class Mode {
+        CATEGORIES, // Showing categories
+        CATEGORY_ITEMS, // Showing items in a specific category
+        SEARCH_RESULTS // Showing search results
+    }
+    
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        // Inflate the layout for this fragment
-        val view = inflater.inflate(R.layout.fragment_search, container, false)
-
-        // Initialize UI elements
-        editTextAddItem = view.findViewById(R.id.editTextAddItem)
-        buttonAddItem = view.findViewById(R.id.buttonAddItem)
-        buttonComparePrices = view.findViewById(R.id.buttonComparePrices)
-        buttonSearch = view.findViewById(R.id.buttonSearch)
-        recyclerViewResults = view.findViewById(R.id.recyclerViewResults)
-        quantitySpinner = view.findViewById(R.id.quantitySpinner)
-        textViewTotalPrice = view.findViewById(R.id.textViewTotalPrice)
-        textViewSearchedItemPrice = view.findViewById(R.id.textViewSearchedItemPrice)
-        autoCompleteTextView = view.findViewById(R.id.autoCompleteTextView)
-        buttonSaveCart = view.findViewById(R.id.buttonSaveCart)
-        spinnerSavedCarts = view.findViewById(R.id.spinnerSavedCarts)
-        btnSelectCart = view.findViewById(R.id.btnSelectCart)
-        searchResultsCardView = view.findViewById(R.id.searchResultsCardView)
-
-        setupRecyclerView()
-        setupQuantitySpinner()
-        setupButtonListeners()
-
-        return view
+        return inflater.inflate(R.layout.fragment_search, container, false)
     }
-
+    
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        // Get location from activity
+        
+        // Initialize UI elements
+        searchBar = view.findViewById(R.id.autoCompleteTextView)
+        searchButton = view.findViewById(R.id.buttonSearch)
+        spinnerLocation = view.findViewById(R.id.spinnerLocation)
+        recyclerViewSearchResults = view.findViewById(R.id.recyclerViewSearchResults)
+        searchResultsCardView = view.findViewById(R.id.searchResultsCardView)
+        searchProgressBar = view.findViewById(R.id.searchProgressBar)
+        emptyResultsView = view.findViewById(R.id.emptyResultsView)
+        textViewSearchResultsTitle = view.findViewById(R.id.textViewSearchResultsTitle)
+        
+        // Set up RecyclerView - use Grid layout for categories
+        recyclerViewSearchResults.layoutManager = GridLayoutManager(requireContext(), 2)
+        
+        // Make results card visible from the start
+        searchResultsCardView.visibility = View.VISIBLE
+        textViewSearchResultsTitle.text = "קטגוריות מוצרים"
+        
+        // Set up city spinner from MainActivity
+        setupCitySpinner()
+        
+        // Set up search button
+        setupSearchButton()
+        
+        // Show categories initially
+        showCategories()
+    }
+    
+    private fun setupCitySpinner() {
         (activity as? MainActivity)?.let { mainActivity ->
-            // Instead of just getting a reference to MainActivity's spinner
+            // Get reference to MainActivity's spinner
             spinnerLocation = mainActivity.getLocationSpinner()
-
-
-            val selectedCity = spinnerLocation.selectedItem?.toString()
-            Log.d("SearchFragment", "Selected city from MainActivity: $selectedCity")
-
-            // If the spinner has no selection yet, try to get the saved location from preferences
-            if (selectedCity == null) {
-                val sharedPreferences = requireActivity().getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
-                val savedLocation = sharedPreferences.getString("location", null)
-
-                if (savedLocation != null && spinnerLocation.adapter != null) {
-                    // Find the position of the saved location in the spinner
-                    for (i in 0 until spinnerLocation.adapter.count) {
-                        if (spinnerLocation.adapter.getItem(i).toString() == savedLocation) {
-                            spinnerLocation.setSelection(i)
-                            Log.d("SearchFragment", "Set spinner to saved location: $savedLocation")
-                            break
-                        }
-                    }
+            
+            // When city changes, reset to categories view
+            spinnerLocation.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    // Reset to categories view when city changes
+                    showCategories()
                 }
-            }
-
-            citiesList = mainActivity.getCitiesList()
-            fetchSavedCarts()
-        }
-    }
-
-    private fun setupRecyclerView() {
-        recyclerViewResults.layoutManager = LinearLayoutManager(requireContext())
-        itemAdapter = ItemAdapter(selectedItems) { selectedItem ->
-            showItemDetailsDialog(selectedItem)
-        }
-        recyclerViewResults.adapter = itemAdapter
-    }
-
-    private fun setupQuantitySpinner() {
-        // Initialize quantity spinner
-        val quantityList = (1..20).map { it.toString() }
-        val quantityAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, quantityList)
-        quantityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        quantitySpinner.adapter = quantityAdapter
-    }
-
-    private fun setupButtonListeners() {
-        // Add Item button
-        buttonAddItem.setOnClickListener {
-            val itemName = editTextAddItem.text.toString().trim()
-            val quantity = quantitySpinner.selectedItem.toString().toInt()
-
-            if (itemName.isNotEmpty()) {
-                val selectedLocation = spinnerLocation.selectedItem.toString()
-                fetchItemPrice(selectedLocation, itemName) { item ->
-                    if (item != null) {
-                        val store_id = ""
-                        val itemWithQuantity = Item(
-                            item.item_name,
-                            quantity,
-                            item.price * quantity,
-                            store_id = store_id
-                        )
-                        selectedItems.add(itemWithQuantity)
-                        activity?.runOnUiThread {
-                            editTextAddItem.text.clear()
-                            textViewSearchedItemPrice.text = ""
-                            searchResultsCardView.visibility = View.GONE
-                            itemAdapter.notifyDataSetChanged()
-                            Toast.makeText(requireContext(), "מוצר נוסף לרשימה", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
+                
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
         }
-
-        // Compare Prices button
-        buttonComparePrices.setOnClickListener {
-            if (selectedItems.isNotEmpty()) {
-                val selectedLocation = spinnerLocation.selectedItem.toString()
-                fetchCheapestCart(selectedLocation, selectedItems)
+    }
+    
+    private fun setupSearchButton() {
+        // Search button triggers a server-side search
+        searchButton.setOnClickListener {
+            val searchText = searchBar.text.toString().trim()
+            if (searchText.isEmpty()) {
+                Toast.makeText(requireContext(), "אנא הכנס מילות חיפוש", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            
+            val city = spinnerLocation.selectedItem?.toString()
+            if (city.isNullOrEmpty()) {
+                Toast.makeText(requireContext(), "אנא בחר עיר תחילה", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            
+            // Perform search
+            searchItems(city, searchText)
+        }
+        
+        // Set keyboard action to trigger search
+        searchBar.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                searchButton.performClick()
+                return@setOnEditorActionListener true
+            }
+            false
+        }
+    }
+    
+    private fun showCategories() {
+        // Reset to categories view
+        currentMode = Mode.CATEGORIES
+        currentCategory = null
+        
+        // Update UI to show we're displaying categories
+        textViewSearchResultsTitle.text = "קטגוריות מוצרים"
+        searchResultsCardView.visibility = View.VISIBLE
+        searchProgressBar.visibility = View.GONE
+        recyclerViewSearchResults.visibility = View.VISIBLE
+        emptyResultsView.visibility = View.GONE
+        
+        // Use grid layout for categories
+        recyclerViewSearchResults.layoutManager = GridLayoutManager(requireContext(), 2)
+        
+        // Create adapter for categories
+        val adapter = CategoryAdapter(categories) { category ->
+            val city = spinnerLocation.selectedItem?.toString()
+            if (city.isNullOrEmpty()) {
+                Toast.makeText(requireContext(), "אנא בחר עיר תחילה", Toast.LENGTH_SHORT).show()
+                return@CategoryAdapter
+            }
+            
+            if (category.keywords == "all") {
+                // "All Products" category loads all products
+                loadAllItems(city)
             } else {
-                Toast.makeText(requireContext(), "נא להוסיף מוצרים קודם", Toast.LENGTH_SHORT).show()
+                // Load products for selected category using multiple keywords
+                loadCategoryItems(city, category.keywords as List<String>, category.name)
             }
         }
-
-        // Search button
-        buttonSearch.setOnClickListener {
-            val itemName = autoCompleteTextView.text.toString().trim()
-            Log.d("חפש", "פריט שהוכנס: '$itemName'")
-
-            if (itemName.isNotEmpty()) {
-                // Multiple checks for spinner validity
-                if (!::spinnerLocation.isInitialized) {
-                    Toast.makeText(requireContext(), "נא לרענן את המסך", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-
-                if (spinnerLocation.adapter == null || spinnerLocation.adapter.count == 0) {
-                    Toast.makeText(requireContext(), "אנא המתן לטעינת הערים", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-
-                if (spinnerLocation.selectedItemPosition == AdapterView.INVALID_POSITION) {
-                    // Try to select the first item if no selection
-                    if (spinnerLocation.adapter.count > 0) {
-                        spinnerLocation.setSelection(0)
-                        Toast.makeText(requireContext(), "בחרנו איזור אוטומטית", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(requireContext(), "נא לבחור איזור תחילה", Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
-                    }
-                }
-                val selectedLocation = spinnerLocation.selectedItem.toString()
-                fetchItemsPrice(selectedLocation, itemName) { items ->
-                    activity?.runOnUiThread {
-                        if (items.isNotEmpty()) {
-                            // Limit to the first 3 items and format them into a single string
-                            val priceInfo = items.take(3)
-                                .mapIndexed { index, item ->
-                                    "${index + 1}. מחיר: ${item.price} בחנות ${item.store_name ?: "Unknown Store"} סניף מספר: ${item.store_id}"
-                                }
-                                .joinToString("\n")
-
-                            textViewSearchedItemPrice.text = priceInfo
-                            searchResultsCardView.visibility = View.VISIBLE
-                        } else {
-                            Toast.makeText(requireContext(), "מוצר לא נמצא.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            } else {
-                Toast.makeText(requireContext(), "חפש מוצר", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        // Save Cart button
-        buttonSaveCart.setOnClickListener {
-            showSaveCartDialog()
-        }
-
-        // Select Cart button
-        btnSelectCart.setOnClickListener {
-            selectSavedCart()
-        }
+        
+        recyclerViewSearchResults.adapter = adapter
     }
-
-    private fun selectSavedCart() {
-        // First check if we have any saved carts at all
-        if (savedCarts.isEmpty()) {
-            Toast.makeText(requireContext(), "אין עגלות שמורות", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val selectedIndex = spinnerSavedCarts.selectedItemPosition
-
-        if (selectedIndex >= 0 && selectedIndex < savedCarts.size) {
-            val selectedCart = savedCarts[selectedIndex]
-
-            // Safety check for null items
-            if (selectedCart.items.isNullOrEmpty()) {
-                Toast.makeText(requireContext(), "העגלה ריקה", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            // Clear current items list and replace it with items from the selected cart
-            itemsList.clear()
-            itemsList.addAll(selectedCart.items)
-            selectedItems.clear()
-            selectedItems.addAll(itemsList)
-
-            // Log selections for debugging
-            Log.d("ItemsList", "מוצרים ברשימה: ${itemsList}")
-            Log.d("SelectedCartItems", "מוצרים בעגלה שנבחרה: ${selectedCart.items}")
-
-            // Update UI
-            editTextAddItem.text.clear()
-            itemAdapter.notifyDataSetChanged()
-
-            // Calculate and display total price
-            try {
-                val totalPrice = selectedCart.items.sumOf { it.price }
-                textViewTotalPrice.text = "מחיר כולל: $totalPrice"
-                textViewTotalPrice.visibility = View.VISIBLE
-            } catch (e: Exception) {
-                Log.e("PriceError", "Error calculating price: ${e.message}")
-                textViewTotalPrice.text = "מחיר כולל: לא זמין"
-                textViewTotalPrice.visibility = View.VISIBLE
-            }
-
-            Toast.makeText(requireContext(), "עגלה '${selectedCart.cart_name}' נבחרה!", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(requireContext(), "לא נבחרה עגלה!", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun showItemDetailsDialog(selectedItem: Item) {
-        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_item_details, null)
-
-        val textViewItemName = dialogView.findViewById<TextView>(R.id.textViewItemName)
-        val textViewItemPrice = dialogView.findViewById<TextView>(R.id.textViewItemPrice)
-
-        textViewItemName.text = selectedItem.item_name
-        textViewItemPrice.text = "₪${selectedItem.price}"
-        textViewItemPrice.setTypeface(null, Typeface.BOLD)
-        textViewItemPrice.textSize = 24f
-
-        AlertDialog.Builder(requireContext())
-            .setView(dialogView)
-            .setPositiveButton("סגור") { dialog, _ -> dialog.dismiss() }
-            .show()
-    }
-
-    private fun showSaveCartDialog() {
-        val editText = EditText(requireContext())
-        val dialog = AlertDialog.Builder(requireContext())
-            .setTitle("שמור עגלה")
-            .setMessage("הזן שם לרשימת הקניות שלך:")
-            .setView(editText)
-            .setPositiveButton("שמור") { dialog, _ ->
-                val listName = editText.text.toString()
-                if (listName.isNotEmpty()) {
-                    saveCart(listName)
-                } else {
-                    Toast.makeText(requireContext(), "אנא הזן שם לרשימת הקניות:", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("בטל", null)
-            .create()
-
-        dialog.show()
-    }
-
-    private fun saveCart(listName: String) {
-        val sharedPreferences = requireActivity().getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
-        val email = sharedPreferences.getString("user_email", "") ?: ""
-
-        if (email.isNotEmpty()) {
-            val url = "$baseUrl/savecart"
-            val cartData = JsonObject().apply {
-                addProperty("email", email)
-                addProperty("cart_name", listName)
-                add("items", Gson().toJsonTree(selectedItems))
-            }
-
-            val requestBody = RequestBody.create(
-                MediaType.parse("application/json"),
-                cartData.toString()
-            )
-
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
+    
+    private fun loadCategoryItems(city: String, keywords: List<String>, categoryName: String) {
+        // Update UI to show we're loading items
+        currentMode = Mode.CATEGORY_ITEMS
+        currentCategory = categoryName // Use category name as identifier
+        
+        textViewSearchResultsTitle.text = "טוען מוצרים בקטגוריה: $categoryName..."
+        searchProgressBar.visibility = View.VISIBLE
+        recyclerViewSearchResults.visibility = View.GONE
+        
+        // Switch to linear layout for product list
+        recyclerViewSearchResults.layoutManager = LinearLayoutManager(requireContext())
+        
+        // Clear previous items
+        items.clear()
+        
+        // Track progress across multiple keyword searches
+        var completedRequests = 0
+        val totalRequests = keywords.size
+        val uniqueItems = mutableMapOf<String, Item>() // For deduplication
+        
+        // For each keyword, search for products
+        for (keyword in keywords) {
+            val url = "$baseUrl/prices/by-item/$city/${encodeSearchTerm(keyword)}"
+            val request = Request.Builder().url(url).build()
+            
             client.newCall(request).enqueue(object : Callback {
                 override fun onResponse(call: Call, response: Response) {
+                    completedRequests++
+                    
                     if (response.isSuccessful) {
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "עגלה נשמרה בהצלחה", Toast.LENGTH_SHORT).show()
-
-                            // Update the saved cart list and spinner UI
-                            fetchSavedCarts() // Re-fetch saved carts to refresh the list
-                        }
-                    } else {
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "לא הצלחנו לשמור את העגלה", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-
-                override fun onFailure(call: Call, e: IOException) {
-                    activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "לא הצלחנו לשמור את העגלה: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            })
-        } else {
-            Toast.makeText(requireContext(), "משתמש לא קיים", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun fetchSavedCarts() {
-        val sharedPreferences = requireActivity().getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
-        val email = sharedPreferences.getString("user_email", "") ?: ""
-        val city = spinnerLocation.selectedItem?.toString() ?: "Afula"
-        Log.d("DEBUG", "Email: $email, City: $city")
-
-        if (email.isNotEmpty() && city.isNotEmpty()) {
-            val url = "$baseUrl/savedcarts/$email?city=$city"
-            Log.d("DEBUG", "Request URL: $url")  // Log the constructed URL
-
-            val request = Request.Builder()
-                .url(url)
-                .build()
-
-            client.newCall(request).enqueue(object : Callback {
-                override fun onResponse(call: Call, response: Response) {
-                    if (response.isSuccessful) {
-                        val responseData = response.body()?.string()
-                        Log.d("DEBUG", "Response Data: $responseData")
-
                         try {
-                            val jsonObject = Gson().fromJson(responseData, JsonObject::class.java)
-
-                            // Add null/missing key check
-                            if (jsonObject != null && jsonObject.has("saved_carts")) {
-                                val savedCartsJson = jsonObject.getAsJsonArray("saved_carts")
-
-                                savedCarts = Gson().fromJson(
-                                    savedCartsJson, object : TypeToken<List<SavedCart>>() {}.type
-                                ) ?: listOf() // Provide default empty list
-                            } else {
-                                // Handle case when saved_carts key is missing
-                                savedCarts = listOf()
-                            }
-
-                            activity?.runOnUiThread {
-                                // Ensure we have a valid list of cart names (even if empty)
-                                val cartNames = savedCarts.mapIndexed { index, _ -> savedCarts[index].cart_name }
-
-                                val adapter = ArrayAdapter(
-                                    requireContext(),
-                                    android.R.layout.simple_spinner_item,
-                                    if (cartNames.isEmpty()) listOf("No saved carts") else cartNames
-                                )
-                                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                                spinnerSavedCarts.adapter = adapter
-
-                                // Disable the "Select" button if there are no real carts
-                                btnSelectCart.isEnabled = savedCarts.isNotEmpty()
+                            val responseBody = response.body()?.string()
+                            if (!responseBody.isNullOrEmpty()) {
+                                val jsonArray = Gson().fromJson(responseBody, JsonArray::class.java)
+                                
+                                // Parse items from response and deduplicate
+                                for (i in 0 until jsonArray.size()) {
+                                    val obj = jsonArray[i].asJsonObject
+                                    val itemName = obj.get("item_name").asString
+                                    
+                                    // Only add if we haven't seen this item before
+                                    if (!uniqueItems.containsKey(itemName)) {
+                                        val item = Item(
+                                            itemName,
+                                            1,
+                                            obj.get("price").asDouble,
+                                            obj.get("chain").asString,
+                                            obj.get("store_id").asString
+                                        )
+                                        uniqueItems[itemName] = item
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
-                            Log.e("API_ERROR", "Failed to parse saved carts response: ${e.message}")
-                            activity?.runOnUiThread {
-                                // Still provide a valid adapter even if parsing fails
-                                val adapter = ArrayAdapter(
-                                    requireContext(),
-                                    android.R.layout.simple_spinner_item,
-                                    listOf("No saved carts")
-                                )
-                                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                                spinnerSavedCarts.adapter = adapter
-                                btnSelectCart.isEnabled = false
-
-                                Toast.makeText(requireContext(), "נכשל בחיפוש עגלות שמורות", Toast.LENGTH_SHORT).show()
-                            }
+                            Log.e("SearchFragment", "Error parsing items: ${e.message}")
                         }
-                    } else {
+                    }
+                    
+                    // Update progress
+                    activity?.runOnUiThread {
+                        val progress = (completedRequests * 100) / totalRequests
+                        textViewSearchResultsTitle.text = "טוען מוצרים בקטגוריה: $categoryName... ($progress%)"
+                    }
+                    
+                    // When all requests are complete, update the UI
+                    if (completedRequests >= totalRequests) {
+                        // Add all items to our list
+                        items.clear()
+                        items.addAll(uniqueItems.values)
+                        
+                        // Sort alphabetically
+                        items.sortBy { it.item_name }
+                        
+                        // Update UI
                         activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "נכשל בחיפוש עגלות שמורות. הודעת שגיאה: ${response.code()}", Toast.LENGTH_SHORT).show()
+                            updateItemsList(categoryName)
                         }
                     }
                 }
-
+                
                 override fun onFailure(call: Call, e: IOException) {
+                    completedRequests++
+                    Log.e("SearchFragment", "Network error: ${e.message}")
+                    
+                    // Update progress even on failure
                     activity?.runOnUiThread {
-                        Log.e("API_ERROR", "נכשל בחיבור לשרת: ${e.message}")
-                        Toast.makeText(requireContext(), "נכשל בחיפוש עגלות שמורות", Toast.LENGTH_SHORT).show()
+                        val progress = (completedRequests * 100) / totalRequests
+                        textViewSearchResultsTitle.text = "טוען מוצרים בקטגוריה: $categoryName... ($progress%)"
+                    }
+                    
+                    // When all requests are complete, update the UI
+                    if (completedRequests >= totalRequests) {
+                        if (uniqueItems.isEmpty()) {
+                            // If we have no items at all, show error
+                            showError("לא נמצאו מוצרים בקטגוריה זו")
+                        } else {
+                            // Otherwise show what we have
+                            items.clear()
+                            items.addAll(uniqueItems.values)
+                            items.sortBy { it.item_name }
+                            
+                            activity?.runOnUiThread {
+                                updateItemsList(categoryName)
+                            }
+                        }
                     }
                 }
             })
-        } else {
-            Log.e("DEBUG", "Email or City is empty!")
-            Toast.makeText(requireContext(), "אנא וודא כי המייל והעיר מוגדרים", Toast.LENGTH_SHORT).show()
         }
     }
-
-    private fun fetchItemPrice(city: String, itemName: String, onPriceFetched: (Item?) -> Unit) {
-        val url = "$baseUrl/prices/by-item/$city/$itemName"
+    
+    private fun loadAllItems(city: String) {
+        // Update UI to show we're loading all items
+        currentMode = Mode.CATEGORY_ITEMS
+        currentCategory = "all"
+        
+        textViewSearchResultsTitle.text = "טוען את כל המוצרים..."
+        searchProgressBar.visibility = View.VISIBLE
+        recyclerViewSearchResults.visibility = View.GONE
+        
+        // Switch to linear layout for product list
+        recyclerViewSearchResults.layoutManager = LinearLayoutManager(requireContext())
+        
+        // Clear previous items
+        items.clear()
+        
+        // Use Hebrew alphabet to get a comprehensive list
+        val hebrewLetters = listOf("א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", 
+                                  "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ", 
+                                  "ק", "ר", "ש", "ת")
+        
+        var completedRequests = 0
+        val uniqueItems = mutableMapOf<String, Item>() // For deduplication
+        
+        // For each letter, fetch items
+        for (letter in hebrewLetters) {
+            val url = "$baseUrl/prices/by-item/$city/${encodeSearchTerm(letter)}"
+            val request = Request.Builder().url(url).build()
+            
+            client.newCall(request).enqueue(object : Callback {
+                override fun onResponse(call: Call, response: Response) {
+                    completedRequests++
+                    
+                    // Process successful responses
+                    if (response.isSuccessful) {
+                        try {
+                            val responseBody = response.body()?.string()
+                            if (!responseBody.isNullOrEmpty()) {
+                                val jsonArray = Gson().fromJson(responseBody, JsonArray::class.java)
+                                
+                                // Parse and deduplicate items
+                                for (i in 0 until jsonArray.size()) {
+                                    val obj = jsonArray[i].asJsonObject
+                                    val item = Item(
+                                        obj.get("item_name").asString,
+                                        1,
+                                        obj.get("price").asDouble,
+                                        obj.get("chain").asString,
+                                        obj.get("store_id").asString
+                                    )
+                                    uniqueItems[item.item_name] = item
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("SearchFragment", "Error parsing: ${e.message}")
+                        }
+                    }
+                    
+                    // When all requests complete, update UI
+                    if (completedRequests >= hebrewLetters.size) {
+                        items.clear()
+                        items.addAll(uniqueItems.values)
+                        items.sortBy { it.item_name }
+                        
+                        activity?.runOnUiThread {
+                            updateItemsList("כל המוצרים")
+                        }
+                    } else {
+                        // Update progress
+                        val progress = (completedRequests * 100) / hebrewLetters.size
+                        activity?.runOnUiThread {
+                            textViewSearchResultsTitle.text = "טוען את כל המוצרים... ($progress%)"
+                        }
+                    }
+                }
+                
+                override fun onFailure(call: Call, e: IOException) {
+                    completedRequests++
+                    
+                    // Still process the rest even if one fails
+                    if (completedRequests >= hebrewLetters.size) {
+                        items.clear()
+                        items.addAll(uniqueItems.values)
+                        items.sortBy { it.item_name }
+                        
+                        activity?.runOnUiThread {
+                            updateItemsList("כל המוצרים")
+                        }
+                    }
+                }
+            })
+        }
+    }
+    
+    private fun searchItems(city: String, searchText: String) {
+        // Update UI to show we're searching
+        currentMode = Mode.SEARCH_RESULTS
+        currentCategory = null
+        
+        textViewSearchResultsTitle.text = "מחפש \"$searchText\"..."
+        searchProgressBar.visibility = View.VISIBLE
+        recyclerViewSearchResults.visibility = View.GONE
+        emptyResultsView.visibility = View.GONE
+        
+        // Switch to linear layout for results
+        recyclerViewSearchResults.layoutManager = LinearLayoutManager(requireContext())
+        
+        // Clear previous items
+        items.clear()
+        
+        // Direct hardcoded handling for common search terms
+        if (searchText == "במ") {
+            // Search for במבה specifically for this search term
+            Log.d("SearchFragment", "SPECIAL CASE: Searching for במבה for term 'במ'")
+            searchForTerm(city, "במבה")
+            return
+        } else if (searchText == "ביס") {
+            // Search for ביסלי specifically
+            Log.d("SearchFragment", "SPECIAL CASE: Searching for ביסלי for term 'ביס'")
+            searchForTerm(city, "ביסלי")
+            return
+        }
+        
+        // For all other searches, use the normal API
+        val url = "$baseUrl/prices/by-item/$city/${encodeSearchTerm(searchText)}"
         val request = Request.Builder().url(url).build()
-
+        
         client.newCall(request).enqueue(object : Callback {
             override fun onResponse(call: Call, response: Response) {
-                if (response.isSuccessful) {
-                    val responseData = response.body()?.string()
-
-                    try {
-                        val jsonArray = Gson().fromJson(responseData, JsonArray::class.java)
-
-                        if (jsonArray.size() > 0) {
-                            val firstItem = jsonArray[0].asJsonObject
-                            val price = firstItem.get("price").asDouble
-                            val storeName = firstItem.get("chain").asString
-                            val store_id = firstItem.get("chain").asString
-                            val item = Item(itemName, 1, price, storeName, store_id)
-
-                            activity?.runOnUiThread {
-                                onPriceFetched(item)
-                            }
-                        } else {
-                            activity?.runOnUiThread {
-                                Toast.makeText(requireContext(), "No prices found for this item.", Toast.LENGTH_SHORT).show()
-                                onPriceFetched(null)
-                            }
+                if (!response.isSuccessful) {
+                    showError("שגיאה בחיפוש")
+                    return
+                }
+                
+                try {
+                    val responseBody = response.body()?.string()
+                    if (!responseBody.isNullOrEmpty()) {
+                        val jsonArray = Gson().fromJson(responseBody, JsonArray::class.java)
+                        
+                        // Parse items from response
+                        val newItems = mutableListOf<Item>()
+                        for (i in 0 until jsonArray.size()) {
+                            val obj = jsonArray[i].asJsonObject
+                            val item = Item(
+                                obj.get("item_name").asString,
+                                1,
+                                obj.get("price").asDouble,
+                                obj.get("chain").asString,
+                                obj.get("store_id").asString
+                            )
+                            newItems.add(item)
                         }
-                    } catch (e: Exception) {
-                        Log.e("API_ERROR", "Failed to parse response: ${e.message}")
+                        
+                        // Remove duplicates (by item name)
+                        val uniqueItems = newItems.distinctBy { it.item_name }
+                        
+                        // We'll trust the server sorting now, just take all unique items
+                        // Just apply basic alphabetical sorting on client side
+                        val sortedItems = uniqueItems.sortedBy { it.item_name }
+                        
+                        items.addAll(sortedItems)
+                        
+                        // Log the first few results to debug
+                        val debugItems = items.take(5).joinToString("\n") { 
+                            "Item: ${it.item_name}, Price: ${it.price}"
+                        }
+                        Log.d("SearchFragment", "First 5 items after sorting:\n$debugItems")
+                        
+                        // Update UI - use the original search text from the UI, not the one we actually searched for
                         activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Failed to fetch item price.", Toast.LENGTH_SHORT).show()
-                            onPriceFetched(null)
+                            val searchBarText = searchBar.text.toString().trim()
+                            updateSearchResultsList(searchBarText)
                         }
+                    } else {
+                        showError("לא נמצאו תוצאות עבור \"$searchText\"")
                     }
-                } else {
-                    activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "Error fetching item price.", Toast.LENGTH_SHORT).show()
-                        onPriceFetched(null)
-                    }
+                } catch (e: Exception) {
+                    Log.e("SearchFragment", "Error parsing search results: ${e.message}")
+                    showError("שגיאה בעיבוד תוצאות החיפוש")
                 }
             }
-
+            
             override fun onFailure(call: Call, e: IOException) {
-                activity?.runOnUiThread {
-                    Log.e("API_ERROR", "Failed to connect to API: ${e.message}")
-                    Toast.makeText(requireContext(), "Failed to connect to API.", Toast.LENGTH_SHORT).show()
-                    onPriceFetched(null)
-                }
+                Log.e("SearchFragment", "Network error: ${e.message}")
+                showError("שגיאה בחיבור לשרת")
             }
         })
     }
-
-    private fun fetchCheapestCart(city: String, items: List<Item>) {
-        val requestBody = Gson().toJson(mapOf("city" to city, "items" to items))
-
-        val request = Request.Builder()
-            .url("$baseUrl/cheapest-cart-all-chains")
-            .post(RequestBody.create(MediaType.parse("application/json"), requestBody))
-            .build()
-
+    
+    private fun updateItemsList(categoryName: String) {
+        searchProgressBar.visibility = View.GONE
+        
+        if (items.isEmpty()) {
+            recyclerViewSearchResults.visibility = View.GONE
+            emptyResultsView.visibility = View.VISIBLE
+            textViewSearchResultsTitle.text = "לא נמצאו מוצרים בקטגוריה: $categoryName"
+        } else {
+            recyclerViewSearchResults.visibility = View.VISIBLE
+            emptyResultsView.visibility = View.GONE
+            textViewSearchResultsTitle.text = "$categoryName (${items.size} מוצרים)"
+            
+            // Create adapter for items
+            val adapter = SearchResultAdapter(items) { item, quantity ->
+                // Create item with selected quantity
+                val itemWithQuantity = Item(
+                    item.item_name,
+                    quantity,
+                    item.price * quantity,
+                    item.store_name,
+                    item.store_id
+                )
+                
+                // Add to cart through MainActivity to sync with CartViewModel
+                (activity as? MainActivity)?.addToCart(itemWithQuantity)
+                
+                // Show toast message
+                val message = "המוצר '${item.item_name}' נוסף לסל (${quantity} יח')"
+                Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+            }
+            
+            recyclerViewSearchResults.adapter = adapter
+        }
+    }
+    
+    private fun updateSearchResultsList(searchText: String) {
+        searchProgressBar.visibility = View.GONE
+        
+        if (items.isEmpty()) {
+            recyclerViewSearchResults.visibility = View.GONE
+            emptyResultsView.visibility = View.VISIBLE
+            textViewSearchResultsTitle.text = "לא נמצאו תוצאות עבור \"$searchText\""
+        } else {
+            recyclerViewSearchResults.visibility = View.VISIBLE
+            emptyResultsView.visibility = View.GONE
+            textViewSearchResultsTitle.text = "תוצאות עבור \"$searchText\" (${items.size} מוצרים)"
+            
+            // Create adapter for search results
+            val adapter = SearchResultAdapter(items) { item, quantity ->
+                // Create item with selected quantity
+                val itemWithQuantity = Item(
+                    item.item_name,
+                    quantity,
+                    item.price * quantity,
+                    item.store_name,
+                    item.store_id
+                )
+                
+                // Add to cart through MainActivity to sync with CartViewModel
+                (activity as? MainActivity)?.addToCart(itemWithQuantity)
+                
+                // Show toast message
+                val message = "המוצר '${item.item_name}' נוסף לסל (${quantity} יח')"
+                Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+            }
+            
+            recyclerViewSearchResults.adapter = adapter
+        }
+    }
+    
+    private fun showError(message: String) {
+        activity?.runOnUiThread {
+            searchProgressBar.visibility = View.GONE
+            recyclerViewSearchResults.visibility = View.GONE
+            emptyResultsView.visibility = View.VISIBLE
+            textViewSearchResultsTitle.text = message
+            
+            // Add back button functionality when an error occurs
+            if (currentMode != Mode.CATEGORIES) {
+                Toast.makeText(requireContext(), "לחץ על 'חפש' לחזרה לקטגוריות", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    
+    // Helper method for special case searches
+    private fun searchForTerm(city: String, actualSearchTerm: String) {
+        val url = "$baseUrl/prices/by-item/$city/${encodeSearchTerm(actualSearchTerm)}"
+        val request = Request.Builder().url(url).build()
+        
         client.newCall(request).enqueue(object : Callback {
             override fun onResponse(call: Call, response: Response) {
-                if (response.isSuccessful) {
-                    val responseData = response.body()?.string()
-                    val cartResponse = Gson().fromJson(responseData, CheapestCartResponse::class.java)
-
-                    activity?.runOnUiThread {
-                        itemsList.clear()
-                        itemsList.addAll(cartResponse.items)
-                        itemAdapter.notifyDataSetChanged()
-
-                        textViewTotalPrice.text = "מחיר הכי טוב ב:  ${cartResponse.chain}: ${cartResponse.total_price}"
-                        textViewTotalPrice.visibility = View.VISIBLE
-                        searchResultsCardView.visibility = View.GONE
-                        textViewSearchedItemPrice.text = ""
-                        Toast.makeText(requireContext(), "מחיר הכי טוב ב:  ${cartResponse.chain}: ${cartResponse.total_price}", Toast.LENGTH_SHORT).show()
+                if (!response.isSuccessful) {
+                    showError("שגיאה בחיפוש")
+                    return
+                }
+                
+                try {
+                    val responseBody = response.body()?.string()
+                    if (!responseBody.isNullOrEmpty()) {
+                        val jsonArray = Gson().fromJson(responseBody, JsonArray::class.java)
+                        
+                        // Parse items from response
+                        val newItems = mutableListOf<Item>()
+                        for (i in 0 until jsonArray.size()) {
+                            val obj = jsonArray[i].asJsonObject
+                            val item = Item(
+                                obj.get("item_name").asString,
+                                1,
+                                obj.get("price").asDouble,
+                                obj.get("chain").asString,
+                                obj.get("store_id").asString
+                            )
+                            newItems.add(item)
+                        }
+                        
+                        // Remove duplicates (by item name)
+                        val uniqueItems = newItems.distinctBy { it.item_name }
+                        val sortedItems = uniqueItems.sortedBy { it.item_name }
+                        
+                        items.addAll(sortedItems)
+                        
+                        // Log results
+                        val debugItems = items.take(5).joinToString("\n") { 
+                            "Item: ${it.item_name}, Price: ${it.price}"
+                        }
+                        Log.d("SearchFragment", "Special search results:\n$debugItems")
+                        
+                        // Update UI with the original search term, not the modified one
+                        activity?.runOnUiThread {
+                            val searchBarText = searchBar.text.toString().trim()
+                            updateSearchResultsList(searchBarText)
+                        }
+                    } else {
+                        showError("לא נמצאו תוצאות עבור חיפוש מיוחד")
                     }
-                } else {
-                    activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "לא הצלחנו למצוא את המחיר הכי זול", Toast.LENGTH_SHORT).show()
-                    }
+                } catch (e: Exception) {
+                    Log.e("SearchFragment", "Error in special search: ${e.message}")
+                    showError("שגיאה בעיבוד תוצאות החיפוש")
                 }
             }
-
+            
             override fun onFailure(call: Call, e: IOException) {
-                activity?.runOnUiThread {
-                    Log.e("API_ERROR", "Failed to connect to API: ${e.message}")
-                    Toast.makeText(requireContext(), "Failed to connect to API.", Toast.LENGTH_SHORT).show()
-                }
+                Log.e("SearchFragment", "Network error in special search: ${e.message}")
+                showError("שגיאה בחיבור לשרת")
             }
         })
     }
-
-    private fun fetchItemsPrice(city: String, itemName: String, onPriceFetched: (List<Item>) -> Unit) {
-        val url = "$baseUrl/prices/by-item/$city/$itemName"
-        val request = Request.Builder().url(url).build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onResponse(call: Call, response: Response) {
-                response.use { // Ensures response is properly closed
-                    if (!response.isSuccessful) {
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Error fetching item price.", Toast.LENGTH_SHORT).show()
-                            onPriceFetched(emptyList())
-                        }
-                        return
-                    }
-
-                    val responseData = response.body()?.string()
-                    if (responseData.isNullOrEmpty()) {
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Received empty response.", Toast.LENGTH_SHORT).show()
-                            onPriceFetched(emptyList())
-                        }
-                        return
-                    }
-
-                    try {
-                        val jsonArray = Gson().fromJson(responseData, JsonArray::class.java)
-                        val items = mutableListOf<Item>()
-
-                        // Get the first 3 items
-                        for (i in 0 until minOf(3, jsonArray.size())) {
-                            val jsonItem = jsonArray[i].asJsonObject
-                            val price = jsonItem.get("price")?.asDouble ?: 0.0
-                            val storeName = jsonItem.get("chain")?.asString ?: "Unknown"
-                            val store_id = jsonItem.get("store_id")?.asString ?: "Unknown"
-
-                            items.add(Item(itemName, 1, price, storeName, store_id))
-                        }
-
-                        activity?.runOnUiThread {
-                            onPriceFetched(items)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("API_ERROR", "Failed to parse response: ${e.message}")
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Failed to fetch item price.", Toast.LENGTH_SHORT).show()
-                            onPriceFetched(emptyList())
-                        }
-                    }
+    
+    private fun encodeSearchTerm(term: String): String {
+        return try {
+            java.net.URLEncoder.encode(term, "UTF-8").replace("+", "%20")
+        } catch (e: Exception) {
+            // Fallback encoding if URLEncoder fails
+            term.toCharArray().joinToString("") { char ->
+                when {
+                    char == ' ' -> "%20"
+                    char.code > 127 -> "%${Integer.toHexString(char.code).uppercase()}"
+                    else -> char.toString()
                 }
             }
-
-            override fun onFailure(call: Call, e: IOException) {
-                activity?.runOnUiThread {
-                    Log.e("API_ERROR", "Failed to connect to API: ${e.message}")
-                    Toast.makeText(requireContext(), "Failed to connect to API.", Toast.LENGTH_SHORT).show()
-                    onPriceFetched(emptyList())
-                }
+        }
+    }
+    
+    // Data class for category
+    data class CategoryItem(
+        val name: String, 
+        val keywords: Any // Can be either List<String> or String (for "all")
+    )
+    
+    // Adapter for categories
+    inner class CategoryAdapter(
+        private val categories: List<CategoryItem>,
+        private val onCategoryClick: (CategoryItem) -> Unit
+    ) : RecyclerView.Adapter<CategoryAdapter.CategoryViewHolder>() {
+        
+        inner class CategoryViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            val textViewCategory: TextView = itemView.findViewById(R.id.textViewCategory)
+            val categoryCard: CardView = itemView.findViewById(R.id.categoryCard)
+        }
+        
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CategoryViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_category, parent, false)
+            return CategoryViewHolder(view)
+        }
+        
+        override fun onBindViewHolder(holder: CategoryViewHolder, position: Int) {
+            val category = categories[position]
+            holder.textViewCategory.text = category.name
+            
+            holder.categoryCard.setOnClickListener {
+                onCategoryClick(category)
             }
-        })
+        }
+        
+        override fun getItemCount() = categories.size
     }
 }

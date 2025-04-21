@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PriceComparisonApp</string>
+    <string name="app_name">Champion Cart</string>
     <string name="search">search</string>
     <string name="logOut">log out</string>
     <string name="searchItems">Search Items</string>
