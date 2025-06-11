@@ -38,6 +38,7 @@ android {
     }
     buildFeatures {
         compose = true
+        viewBinding = true // Keep this temporarily during migration
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.1"
@@ -47,9 +48,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
 }
 
 dependencies {
+    // Existing dependencies
     implementation(libs.constraintlayout)
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
@@ -65,6 +68,20 @@ dependencies {
     implementation(libs.androidx.recyclerview)
     implementation(libs.material)
     implementation(libs.androidx.activity)
+
+    // Additional Compose dependencies for migration
+    implementation("androidx.navigation:navigation-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
+    implementation("androidx.compose.runtime:runtime-livedata:1.5.4")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Keep your existing networking libraries
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

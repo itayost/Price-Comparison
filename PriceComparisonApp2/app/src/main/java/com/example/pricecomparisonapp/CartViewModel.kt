@@ -28,6 +28,34 @@ class CartViewModel : ViewModel() {
         }
     }
     
+    // New method to remove item by object reference
+    fun removeFromCart(item: Item) {
+        val currentItems = _cartItems.value ?: mutableListOf()
+        val position = currentItems.indexOfFirst { it.item_name == item.item_name }
+        if (position != -1) {
+            currentItems.removeAt(position)
+            _cartItems.value = currentItems
+        }
+    }
+    
+    // New method to update item quantity
+    fun updateItemQuantity(item: Item, newQuantity: Int) {
+        val currentItems = _cartItems.value ?: mutableListOf()
+        val position = currentItems.indexOfFirst { it.item_name == item.item_name }
+        if (position != -1) {
+            val currentItem = currentItems[position]
+            val updatedItem = Item(
+                currentItem.item_name,
+                newQuantity,
+                (currentItem.price / currentItem.quantity) * newQuantity,
+                currentItem.store_name,
+                currentItem.store_id
+            )
+            currentItems[position] = updatedItem
+            _cartItems.value = currentItems
+        }
+    }
+    
     fun updateCheapestCart(store: String, price: Double) {
         _cheapestStore.value = store
         _totalPrice.value = price

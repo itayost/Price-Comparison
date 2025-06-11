@@ -1,0 +1,3 @@
+"""
+Price Comparison Server package.
+"""
