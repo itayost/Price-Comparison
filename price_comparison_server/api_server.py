@@ -44,8 +44,8 @@ def home():
 
 # Run scheduled scraping on startup
 def run_scheduled_tasks():
-    # scrape_shufersal()
-    # scrape_victory()
+    scrape_shufersal()
+    scrape_victory()
     schedule.every(1).hour.do(scrape_shufersal)
     schedule.every(1).hour.do(scrape_victory)
 
