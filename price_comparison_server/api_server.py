@@ -60,10 +60,10 @@ def start_scheduled_scraping():
 # Call start_scheduled_scraping when the app starts
 @app.on_event("startup")
 def startup_event():
-    #start_scheduled_scraping()
     print("Initializing database...")
     init_db()
     print("Database initialized successfully!")
+    start_scheduled_scraping()
 
 # Run the API server with:
 # uvicorn api_server:app --host 0.0.0.0 --reload
