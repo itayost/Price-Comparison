@@ -1,10 +1,11 @@
 import bcrypt
 import jwt
 import datetime
+import os
 from typing import Dict, Any
 
 # JWT configuration
-SECRET_KEY = "iJJrwjxbCBE3OpbxKwexfmZLMCNlVkD1/LaA3o0Rx91e7dDkcd1ggiPctUjaYasY"  
+SECRET_KEY = os.getenv("SECRET_KEY", "iJJrwjxbCBE3OpbxKwexfmZLMCNlVkD1/LaA3o0Rx91e7dDkcd1ggiPctUjaYasY")
 ALGORITHM = "HS256"
 
 def hash_password(password: str) -> str:
