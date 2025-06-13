@@ -542,7 +542,7 @@ def get_or_create_store(db_session, snif_key: str, chain: str) -> Store:
     return store
 
 def save_prices_to_db(chain: str, prices_data: List[tuple]):
-    """Save prices to PostgreSQL database"""
+    """Save prices to PostgreSQL database with batching"""
     with get_db() as db:
         try:
             # Group prices by store
@@ -557,23 +557,36 @@ def save_prices_to_db(chain: str, prices_data: List[tuple]):
                 # Get or create store
                 store = get_or_create_store(db, snif_key, chain)
 
-                # Delete old prices for this store (optional - you might want to keep history)
+                # Delete old prices for this store
                 db.query(Price).filter(Price.store_id == store.id).delete()
 
-                # Add new prices
-                for item_code, item_name, item_price in store_prices:
-                    price = Price(
-                        store_id=store.id,
-                        item_code=item_code,
-                        item_name=item_name,
-                        item_price=item_price,
-                        timestamp=datetime.utcnow()
-                    )
-                    db.add(price)
+                # Add new prices in batches
+                BATCH_SIZE = 100  # Insert 100 items at a time
 
-                logger.info(f"Saved {len(store_prices)} items for store {snif_key}")
+                for i in range(0, len(store_prices), BATCH_SIZE):
+                    batch = store_prices[i:i + BATCH_SIZE]
 
-            db.commit()
+                    # Create price objects for this batch
+                    price_objects = []
+                    for item_code, item_name, item_price in batch:
+                        price = Price(
+                            store_id=store.id,
+                            item_code=item_code,
+                            item_name=item_name,
+                            item_price=item_price,
+                            timestamp=datetime.utcnow()
+                        )
+                        price_objects.append(price)
+
+                    # Add batch to session
+                    db.add_all(price_objects)
+
+                    # Commit after each batch
+                    db.commit()
+                    logger.info(f"Saved batch {i//BATCH_SIZE + 1} for store {snif_key}")
+
+                logger.info(f"Saved total {len(store_prices)} items for store {snif_key}")
+
             logger.info(f"Successfully saved all {chain} prices to database")
 
         except Exception as e:

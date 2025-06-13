@@ -23,12 +23,14 @@ print(f"Using database: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 
 
 # Create engine
 if "postgresql" in DATABASE_URL:
-    # PostgreSQL settings
+    # PostgreSQL settings with smaller pool
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20
+        pool_size=5,  # Reduced from 10
+        max_overflow=10,  # Reduced from 20
+        pool_timeout=30,
+        pool_recycle=1800
     )
 else:
     # SQLite settings (for local dev)
