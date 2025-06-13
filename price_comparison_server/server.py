@@ -696,4 +696,3 @@ def scrape_victory():
     if all_prices:
         save_prices_to_db('victory', all_prices)
         logger.info(f"Completed Victory scraping: {len(all_prices)} total prices")
-Should we continue with updating db_utils.
