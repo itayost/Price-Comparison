@@ -1,10 +1,6 @@
-"""
-Price Routes Module - Complete Rewrite
-Handles all price-related API endpoints with support for cross-chain products
-"""
-
-from fastapi import APIRouter, HTTPException, Query
-import sqlite3
+from fastapi import APIRouter, HTTPException, Query, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import func, and_, or_
 import os
 import sys
 from typing import List, Dict, Any, Set, Optional, Tuple
@@ -22,8 +18,9 @@ if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
 # Import models and utilities
-from models.data_models import Price, CartRequest, CartItem
-from utils.db_utils import get_db_connection, DBS, get_corrected_city_path
+from models.data_models import Price as PriceModel, CartRequest, CartItem
+from database.connection import get_db_session
+from database.models import Store, Price, User, Cart, CartItem as DBCartItem
 
 # Import search function for advanced product matching
 from services.search_service import search_products_by_name_and_city
@@ -31,7 +28,6 @@ from services.search_service import search_products_by_name_and_city
 # Create router
 router = APIRouter(tags=["prices"])
 
-# ============= Helper Classes =============
 
 @dataclass
 class StoreInventory:
@@ -119,97 +115,73 @@ def get_available_cities() -> Dict[str, List[str]]:
 
 # ============= Basic Price Endpoints =============
 
-@router.get("/prices/{db_name}/store/{snif_key}", response_model=List[Price])
-def get_prices_by_store(db_name: str, snif_key: str):
+@router.get("/prices/{chain_name}/store/{snif_key}", response_model=List[PriceModel])
+def get_prices_by_store(chain_name: str, snif_key: str, db: Session = Depends(get_db_session)):
     """Get all prices for a specific store"""
-    if db_name not in DBS:
-        raise HTTPException(status_code=400, detail="Invalid database name. Use 'shufersal' or 'victory'.")
-    
-    # Find the city for this store
-    city = None
-    for city_dir in os.listdir(DBS[db_name]):
-        if os.path.exists(os.path.join(DBS[db_name], city_dir, f"{snif_key}.db")):
-            city = city_dir
-            break
-    
-    if not city:
-        raise HTTPException(status_code=404, detail=f"Store {snif_key} not found in {db_name}")
-    
-    try:
-        conn = get_db_connection(db_name, city, snif_key)
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM prices ORDER BY timestamp DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        
-        return [dict(row) for row in rows]
-    except Exception as e:
-        logger.error(f"Error fetching prices for store {snif_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    # Find the store
+    store = db.query(Store).filter(
+        Store.chain == chain_name,
+        Store.snif_key == snif_key
+    ).first()
 
-@router.get("/prices/{db_name}/item_code/{item_code}", response_model=List[Price])
-def get_prices_by_item_code(db_name: str, item_code: str):
+    if not store:
+        raise HTTPException(status_code=404, detail=f"Store {snif_key} not found in {chain_name}")
+
+    # Get prices for this store
+    prices = db.query(Price).filter(Price.store_id == store.id).all()
+
+    # Convert to response format
+    return [{
+        "snif_key": store.snif_key,
+        "item_code": p.item_code,
+        "item_name": p.item_name,
+        "item_price": p.item_price,
+        "timestamp": p.timestamp.isoformat()
+    } for p in prices]
+
+@router.get("/prices/{chain_name}/item_code/{item_code}", response_model=List[PriceModel])
+def get_prices_by_item_code(chain_name: str, item_code: str, db: Session = Depends(get_db_session)):
     """Get all prices for a specific item code across all stores"""
-    if db_name not in DBS:
-        raise HTTPException(status_code=400, detail="Invalid database name. Use 'shufersal' or 'victory'.")
-    
-    prices = []
-    
-    try:
-        for city in os.listdir(DBS[db_name]):
-            city_path = os.path.join(DBS[db_name], city)
-            if os.path.isdir(city_path):
-                for db_file in os.listdir(city_path):
-                    if db_file.endswith(".db"):
-                        snif_key = db_file.replace(".db", "")
-                        conn = get_db_connection(db_name, city, snif_key)
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT * FROM prices WHERE item_code = ?", (item_code,))
-                        rows = cursor.fetchall()
-                        conn.close()
-                        prices.extend([dict(row) for row in rows])
-    except Exception as e:
-        logger.error(f"Error searching for item code {item_code}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-    if not prices:
+    # Join prices with stores to filter by chain
+    results = db.query(Price, Store).join(Store).filter(
+        Store.chain == chain_name,
+        Price.item_code == item_code
+    ).all()
+
+    if not results:
         raise HTTPException(status_code=404, detail=f"Item code {item_code} not found")
-    
-    return prices
+
+    return [{
+        "snif_key": store.snif_key,
+        "item_code": price.item_code,
+        "item_name": price.item_name,
+        "item_price": price.item_price,
+        "timestamp": price.timestamp.isoformat()
+    } for price, store in results]
 
 # ============= City Endpoints =============
 
 @router.get("/cities-list")
-def get_cities_list():
+def get_cities_list(db: Session = Depends(get_db_session)):
     """Get simple list of all cities"""
-    cities = set()
-    
-    for chain_name, chain_path in DBS.items():
-        if os.path.exists(chain_path):
-            for city in os.listdir(chain_path):
-                city_path = os.path.join(chain_path, city)
-                if os.path.isdir(city_path):
-                    cities.add(city)
-    
-    return sorted(list(cities))
+    cities = db.query(Store.city).distinct().order_by(Store.city).all()
+    return [city[0] for city in cities]
 
 @router.get("/cities-list-with-stores")
-def get_cities_list_with_stores():
+def get_cities_list_with_stores(db: Session = Depends(get_db_session)):
     """Get cities with store count information"""
-    cities_data = {}
-    
-    for chain_name, chain_path in DBS.items():
-        if os.path.exists(chain_path):
-            for city in os.listdir(chain_path):
-                city_path = os.path.join(chain_path, city)
-                if os.path.isdir(city_path):
-                    if city not in cities_data:
-                        cities_data[city] = {'shufersal': 0, 'victory': 0}
-                    
-                    store_count = len([f for f in os.listdir(city_path) if f.endswith('.db')])
-                    cities_data[city][chain_name] = store_count
-    
+    # Query to count stores by city and chain
+    results = db.query(
+        Store.city,
+        Store.chain,
+        func.count(Store.id).label('count')
+    ).group_by(Store.city, Store.chain).all()
+
     # Format the response
+    cities_data = defaultdict(lambda: {'shufersal': 0, 'victory': 0})
+    for city, chain, count in results:
+        cities_data[city][chain] = count
+
     formatted_cities = []
     for city, counts in sorted(cities_data.items()):
         store_info = []
@@ -221,212 +193,45 @@ def get_cities_list_with_stores():
     
     return formatted_cities
 
-# ============= Search Endpoints =============
+# ============= Search Endpoints (Temporary) =============
 
 @router.get("/prices/by-item/{city}/{item_name}")
-def search_products(
-    city: str,
-    item_name: str,
-    group_by_code: bool = Query(True, description="Group identical products by item code"),
-    limit: int = Query(50, description="Maximum number of results", ge=1, le=100)
-):
-    """
-    Search for products by name in a specific city.
-    Returns cross-chain grouped products when group_by_code=True.
-    """
-    logger.info(f"Search request: '{item_name}' in {city} (group_by_code={group_by_code})")
-    
-    try:
-        # Use the search service
-        results = search_products_by_name_and_city(city, item_name, group_by_code)
-        
-        if not results:
-            logger.info(f"No results found for '{item_name}' in {city}")
-            return []
-        
-        # Apply limit
-        limited_results = results[:limit]
-        
-        logger.info(f"Returning {len(limited_results)} results (from {len(results)} total)")
-        return limited_results
-        
-    except Exception as e:
-        logger.error(f"Search error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
-
-@router.get("/prices/identical-products/{city}/{item_name}")
-def get_identical_products(
-    city: str,
-    item_name: str,
-    limit: int = Query(50, description="Maximum number of results", ge=1, le=100)
-):
-    """
-    Get only products that exist in multiple chains (cross-chain products).
-    Useful for direct price comparison of identical items.
-    """
-    logger.info(f"Searching for identical products: '{item_name}' in {city}")
-    
-    try:
-        # Search with grouping enabled
-        all_results = search_products_by_name_and_city(city, item_name, group_by_code=True)
-        
-        # Filter to only cross-chain products
-        cross_chain_products = [
-            product for product in all_results 
-            if product.get('cross_chain', False)
-        ]
-        
-        if not cross_chain_products:
-            logger.info(f"No identical products found across chains for '{item_name}'")
-            return []
-        
-        # Sort by savings (biggest savings first)
-        cross_chain_products.sort(
-            key=lambda p: p.get('price_comparison', {}).get('savings', 0),
-            reverse=True
-        )
-        
-        # Apply limit
-        limited_results = cross_chain_products[:limit]
-        
-        logger.info(f"Found {len(limited_results)} identical products across chains")
-        return limited_results
-        
-    except Exception as e:
-        logger.error(f"Search error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
-
-# ============= Cart Endpoints =============
+def search_products(city: str, item_name: str,
+                   group_by_code: bool = Query(True),
+                   limit: int = Query(50),
+                   db: Session = Depends(get_db_session)):
+    """Temporary implementation - returns empty results"""
+    logger.warning(f"Search not implemented yet for PostgreSQL: {item_name} in {city}")
+    return []
 
 @router.post("/cheapest-cart-all-chains")
-def find_cheapest_cart(cart_request: CartRequest):
-    """
-    Find the cheapest store for a shopping cart.
-    Handles both single-chain and cross-chain products.
-    """
-    logger.info(f"Finding cheapest cart in {cart_request.city} for {len(cart_request.items)} items")
-    
-    # Validate input
-    if not cart_request.items:
-        raise HTTPException(status_code=400, detail="Cart is empty")
-    
-    # Track store inventories
-    store_inventories: Dict[str, StoreInventory] = {}
-    
-    # Search for each item
-    for cart_item in cart_request.items:
-        logger.info(f"Searching for: {cart_item.item_name} (qty: {cart_item.quantity})")
-        
-        try:
-            # Search with grouping to get best prices
-            search_results = search_products_by_name_and_city(
-                cart_request.city, 
-                cart_item.item_name, 
-                group_by_code=True
-            )
-            
-            if not search_results:
-                logger.warning(f"No results found for: {cart_item.item_name}")
-                continue
-            
-            # Process all search results
-            for result in search_results:
-                # Extract price entries from the result
-                price_entries = extract_price_entries(result)
-                
-                # Update store inventories with best prices
-                for entry in price_entries:
-                    store_key = f"{entry.chain}:{entry.store_id}"
-                    
-                    # Create store inventory if needed
-                    if store_key not in store_inventories:
-                        store_inventories[store_key] = StoreInventory(
-                            chain=entry.chain,
-                            store_id=entry.store_id,
-                            items={}
-                        )
-                    
-                    # Update with best price for this item
-                    inventory = store_inventories[store_key]
-                    if (cart_item.item_name not in inventory.items or 
-                        entry.price < inventory.items[cart_item.item_name]):
-                        inventory.items[cart_item.item_name] = entry.price
-                        logger.debug(f"Updated {store_key}: {cart_item.item_name} = ₪{entry.price}")
-                        
-        except Exception as e:
-            logger.error(f"Error searching for {cart_item.item_name}: {str(e)}")
-            continue
-    
-    # Find stores with all items and calculate totals
-    complete_stores = []
-    required_items = [item.item_name for item in cart_request.items]
-    
-    for store_key, inventory in store_inventories.items():
-        if inventory.has_all_items(required_items):
-            total = inventory.calculate_total(cart_request.items)
-            complete_stores.append({
-                "chain": inventory.chain,
-                "store_id": inventory.store_id,
-                "total_price": round(total, 2),
-                "item_prices": inventory.items.copy()
-            })
-            logger.info(f"Complete store: {store_key} = ₪{total:.2f}")
-    
-    if not complete_stores:
-        # Log what we found for debugging
-        logger.warning("No stores have all requested items")
-        for store_key, inventory in store_inventories.items():
-            missing = set(required_items) - set(inventory.items.keys())
-            if missing:
-                logger.info(f"{store_key} missing: {missing}")
-        
-        raise HTTPException(
-            status_code=404,
-            detail="Could not find all items in any single store"
-        )
-    
-    # Sort by total price
-    complete_stores.sort(key=lambda s: s['total_price'])
-    
-    # Get best and worst for savings calculation
-    best_store = complete_stores[0]
-    worst_store = complete_stores[-1]
-    
-    # Calculate savings
-    savings = worst_store['total_price'] - best_store['total_price']
-    savings_percent = (savings / worst_store['total_price'] * 100) if worst_store['total_price'] > 0 else 0
-    
-    logger.info(f"Best: {best_store['chain']}/{best_store['store_id']} = ₪{best_store['total_price']}")
-    logger.info(f"Savings: ₪{savings:.2f} ({savings_percent:.1f}%)")
-    
-    # Return detailed response
+def find_cheapest_cart(cart_request: CartRequest, db: Session = Depends(get_db_session)):
+    """Temporary implementation"""
+    logger.warning("Cheapest cart calculation not implemented for PostgreSQL yet")
     return {
-        "chain": best_store['chain'],
-        "store_id": best_store['store_id'],
-        "total_price": best_store['total_price'],
-        "worst_price": worst_store['total_price'],
-        "savings": round(savings, 2),
-        "savings_percent": round(savings_percent, 2),
+        "error": "This feature is being migrated to PostgreSQL",
         "city": cart_request.city,
-        "items": cart_request.items,
-        "item_prices": best_store['item_prices'],
-        "all_stores": complete_stores[:10]  # Top 10 stores
+        "items": cart_request.items
     }
 
 # ============= Health Check =============
 
 @router.get("/health")
-def health_check():
+def health_check(db: Session = Depends(get_db_session)):
     """Check if the price service is healthy"""
     try:
-        # Check if we can access the databases
-        chains_available = {}
-        for chain_name, chain_path in DBS.items():
-            chains_available[chain_name] = os.path.exists(chain_path)
-        
+        # Test database connection
+        db.execute("SELECT 1")
+
+        # Count records
+        store_count = db.query(Store).count()
+        price_count = db.query(Price).count()
+
         return {
             "status": "healthy",
-            "chains_available": chains_available
+            "database": "connected",
+            "stores": store_count,
+            "prices": price_count
         }
     except Exception as e:
         return {

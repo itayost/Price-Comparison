@@ -7,6 +7,17 @@ from bs4 import BeautifulSoup
 import schedule
 import time
 import os
+from datetime import datetime
+from typing import List, Dict, Any
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Import database models and connection
+from database.connection import get_db
+from database.models import Store, Price
 
 def get_store_city(snif_key):
     chain_id = snif_key.split('-')[0]
@@ -511,60 +522,64 @@ def get_store_city(snif_key):
         "050": "Tel Mond"  # תל מונד
         }
     }
-    return store_cities[chain_id][store_id]
+    return store_cities.get(chain_id, {}).get(store_id, "Unknown")
 
-# Create database for a specific snif_key
-def create_database_for_snif_key(db_name, snif_key):
-    # Create directory if it does not exist
-    if not os.path.exists(db_name):
-        os.makedirs(db_name)
-    
-    # Create city subdirectory
-    city_path = os.path.join(db_name, get_store_city(snif_key))
-    if not os.path.exists(city_path):
-        os.makedirs(city_path)
-            
-    db_path = os.path.join(db_name, get_store_city(snif_key), f"{snif_key}.db")
-    print(db_path)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # Create a prices table
-    cursor.execute('''CREATE TABLE IF NOT EXISTS prices (
-                        snif_key TEXT,
-                        item_code TEXT,
-                        item_name TEXT,
-                        item_price REAL,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )''')
-    
-    conn.commit()
-    conn.close()
+def get_or_create_store(db_session, snif_key: str, chain: str) -> Store:
+    """Get existing store or create new one"""
+    store = db_session.query(Store).filter(Store.snif_key == snif_key).first()
 
-# Save scraped data into the database
-def save_to_database_by_snif_key(db_name, snif_key, prices_data):
-    # Get the path of the database
-    city_path = os.path.join(db_name, get_store_city(snif_key))
-    db_path = os.path.join(city_path, f"{snif_key}.db")
-    
-    # Remove the existing database if it exists
-    if os.path.exists(db_path):
-        os.remove(db_path)
-        print(f"❌ Deleted existing database for {snif_key}")
-    
-    # Create the database again
-    create_database_for_snif_key(db_name, snif_key)
-    
-    # Save the new data into the database
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.executemany('''
-    INSERT INTO prices (snif_key, item_code, item_name, item_price) 
-    VALUES (?, ?, ?, ?)
-    ''', prices_data)
-    conn.commit()
-    conn.close()
-    print(f"✅ Saved {len(prices_data)} items to {snif_key} database")
+    if not store:
+        city = get_store_city(snif_key)
+        store = Store(
+            snif_key=snif_key,
+            chain=chain,
+            city=city,
+            store_name=f"{chain} - {snif_key}"
+        )
+        db_session.add(store)
+        db_session.flush()  # Get the store ID
+
+    return store
+
+def save_prices_to_db(chain: str, prices_data: List[tuple]):
+    """Save prices to PostgreSQL database"""
+    with get_db() as db:
+        try:
+            # Group prices by store
+            prices_by_store = {}
+            for snif_key, item_code, item_name, item_price in prices_data:
+                if snif_key not in prices_by_store:
+                    prices_by_store[snif_key] = []
+                prices_by_store[snif_key].append((item_code, item_name, item_price))
+
+            # Process each store
+            for snif_key, store_prices in prices_by_store.items():
+                # Get or create store
+                store = get_or_create_store(db, snif_key, chain)
+
+                # Delete old prices for this store (optional - you might want to keep history)
+                db.query(Price).filter(Price.store_id == store.id).delete()
+
+                # Add new prices
+                for item_code, item_name, item_price in store_prices:
+                    price = Price(
+                        store_id=store.id,
+                        item_code=item_code,
+                        item_name=item_name,
+                        item_price=item_price,
+                        timestamp=datetime.utcnow()
+                    )
+                    db.add(price)
+
+                logger.info(f"Saved {len(store_prices)} items for store {snif_key}")
+
+            db.commit()
+            logger.info(f"Successfully saved all {chain} prices to database")
+
+        except Exception as e:
+            logger.error(f"Error saving prices: {str(e)}")
+            db.rollback()
+            raise
 
 
 # Function to download and extract GZ file
@@ -611,52 +626,58 @@ def parse_victory_xml(xml_content):
 
 # Scraper for Shufersal
 def scrape_shufersal():
+    logger.info("Starting Shufersal scraping...")
     base_url = 'https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0&page='
-    page_num = 1  # Start from the first page
-    
-    while True and page_num < 21:
+    page_num = 1
+    all_prices = []
+
+    while page_num < 21:  # Limit pages as before
         page_url = base_url + str(page_num)
         response = requests.get(page_url)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             links = soup.find_all('a', text='לחץ להורדה')
-            
+
             if not links:
-                print(f"❌ No more pages or links found at page {page_num}. Ending scrape.")
-                break 
-            
+                logger.info(f"No more pages at page {page_num}")
+                break
+
             for link in links:
                 download_url = link.get('href')
                 if download_url:
-                    print(f"📥 Downloading: {download_url}")
+                    logger.info(f"Downloading: {download_url}")
                     xml_content = download_and_extract_gz(download_url)
                     if xml_content:
                         prices_data = parse_shufersal_xml(xml_content)
-                        for snif_key in set([data[0] for data in prices_data]):  # Separate by snif_key
-                            save_to_database_by_snif_key("shufersal_prices", snif_key, [data for data in prices_data if data[0] == snif_key])
+                        all_prices.extend(prices_data)
 
             page_num += 1
         else:
-            print(f"❌ Failed to fetch Shufersal page {page_num}")
-            break 
+            logger.error(f"Failed to fetch Shufersal page {page_num}")
+            break
 
-# Scraper for Victory (LaibCatalog)
+    # Save all prices to PostgreSQL
+    if all_prices:
+        save_prices_to_db('shufersal', all_prices)
+        logger.info(f"Completed Shufersal scraping: {len(all_prices)} total prices")
+
+
 def scrape_victory():
+    logger.info("Starting Victory scraping...")
     page_url = "https://laibcatalog.co.il/NBCompetitionRegulations.aspx?code=7290696200003&fileType=pricefull"
-    
+    all_prices = []
+
     response = requests.get(page_url)
     if response.status_code != 200:
-        print("❌ Failed to fetch LaibCatalog Victory page")
+        logger.error("Failed to fetch Victory page")
         return
 
     soup = BeautifulSoup(response.text, 'html.parser')
-
-    # Find download links with 'לחץ כאן להורדה'
-    links = soup.find_all('a', string='לחץ כאן להורדה') 
+    links = soup.find_all('a', string='לחץ כאן להורדה')
 
     if not links:
-        print("❌ No download links found for Victory.")
+        logger.error("No download links found for Victory")
         return
 
     base_url = "https://laibcatalog.co.il/"
@@ -665,9 +686,14 @@ def scrape_victory():
         relative_url = link.get('href')
         if relative_url:
             download_url = base_url + relative_url
-            print(f"📥 Downloading: {download_url}")
+            logger.info(f"Downloading: {download_url}")
             xml_content = download_and_extract_gz(download_url)
             if xml_content:
                 prices_data = parse_victory_xml(xml_content)
-                for snif_key in set([data[0] for data in prices_data]):  # Separate by snif_key
-                    save_to_database_by_snif_key("victory_prices", snif_key, [data for data in prices_data if data[0] == snif_key])
+                all_prices.extend(prices_data)
+
+    # Save all prices to PostgreSQL
+    if all_prices:
+        save_prices_to_db('victory', all_prices)
+        logger.info(f"Completed Victory scraping: {len(all_prices)} total prices")
+Should we continue with updating db_utils.

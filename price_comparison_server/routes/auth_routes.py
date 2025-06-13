@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
-import sqlite3
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import sys
 import os
 
@@ -10,49 +11,39 @@ if __name__ == "__main__":
 # Import directly since we've ensured the path is correct
 from models.user_models import UserRegister, UserLogin
 from utils.auth_utils import hash_password, verify_password, create_access_token
-from utils.db_utils import USER_DB
+from database.connection import get_db_session
+from database.models import User
 
 router = APIRouter(tags=["authentication"])
 
 @router.post("/register")
-def register_user(user: UserRegister):
+def register_user(user: UserRegister, db: Session = Depends(get_db_session)):
     try:
-        conn = sqlite3.connect(USER_DB)
-        cursor = conn.cursor()
-        
-        # Check if the email is already registered
-        cursor.execute("SELECT email FROM users WHERE email = ?", (user.email,))
-        if cursor.fetchone():
+        # Check if user exists
+        existing_user = db.query(User).filter(User.email == user.email).first()
+        if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
-        
-        # Hash the password
+
+        # Create new user
         hashed_password = hash_password(user.password)
-        
-        # Insert user into the database
-        cursor.execute("""
-            INSERT INTO users (email, password) VALUES (?, ?)
-        """, (user.email, hashed_password))
-        
-        conn.commit()
-        conn.close()
-        
+        new_user = User(email=user.email, password=hashed_password)
+
+        db.add(new_user)
+        db.commit()
+
         return {"message": "User registered successfully"}
     except HTTPException as e:
         raise e
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 @router.post("/login")
-def login_user(user: UserLogin):
-    conn = sqlite3.connect(USER_DB)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT password FROM users WHERE email = ?", (user.email,))
-    record = cursor.fetchone()
-    
-    conn.close()
-    
-    if not record or not verify_password(user.password, record[0]):
+def login_user(user: UserLogin, db: Session = Depends(get_db_session)):
+    # Find user
+    db_user = db.query(User).filter(User.email == user.email).first()
+
+    if not db_user or not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     token = create_access_token(user.email)
