@@ -64,6 +64,7 @@ def start_scheduled_scraping():
 @app.on_event("startup")
 def startup_event():
     #start_scheduled_scraping()
+    pass
 
 # Run the API server with:
 # uvicorn api_server:app --host 0.0.0.0 --reload
