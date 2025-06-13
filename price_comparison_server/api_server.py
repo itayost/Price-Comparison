@@ -18,8 +18,7 @@ from routes.price_routes import router as price_router
 from routes.cart_routes import router as cart_router
 
 # Initialize databases
-init_user_db()
-init_cart_db()
+from database.connection import init_db
 
 # Create the FastAPI application
 app = FastAPI(
