@@ -12,19 +12,16 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from server import scrape_shufersal, scrape_victory
 
 # Import database initializations
-from utils.db_utils import init_user_db, init_cart_db
+from database.connection import init_db
 from routes.auth_routes import router as auth_router
 from routes.price_routes import router as price_router
 from routes.cart_routes import router as cart_router
-
-# Initialize databases
-from database.connection import init_db
 
 # Create the FastAPI application
 app = FastAPI(
     title="Champion Cart API", 
     description="API for the Champion Cart price comparison application with improved search and price calculation. <br/> Currently supports Victory & Shufersal!", 
-    version="1.1"
+    version="2.0"
 )
 
 # Include routers
@@ -36,11 +33,12 @@ app.include_router(cart_router)
 def home():
     return {
         "message": "Welcome to the Champion Cart API",
-        "version": "1.1",
+        "version": "2.0",
+        "database": "PostgreSQL",
         "improvements": [
-            "Enhanced price comparison with better product matching",
-            "Improved search functionality across store chains",
-            "More accurate cheapest cart calculation"
+            "Migrated to PostgreSQL for better scalability",
+            "Improved database performance",
+            "Ready for production deployment"
         ]
     }
 

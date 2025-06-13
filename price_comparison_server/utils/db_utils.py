@@ -1,60 +1,49 @@
-import sqlite3
 import os
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from database.models import Store, Price, User, Cart, CartItem
 
-# Constants
-USER_DB = "users.db"
+# These constants are kept for backward compatibility
+USER_DB = "users.db"  # Not used with PostgreSQL
 DBS = {
-    "shufersal": "shufersal_prices",
-    "victory": "victory_prices"
+    "shufersal": "shufersal_prices",  # Not used with PostgreSQL
+    "victory": "victory_prices"  # Not used with PostgreSQL
 }
 
 def get_corrected_city_path(chain_dir, city_name):
-    """Find the correct case for city directories that may have case differences."""
-    if not os.path.exists(chain_dir):
-        return None
-        
-    for dir_name in os.listdir(chain_dir):
-        if dir_name.lower() == city_name.lower():
-            return os.path.join(chain_dir, dir_name)
+    """DEPRECATED - Not needed with PostgreSQL"""
     return None
 
 def init_user_db():
-    """Ensure user database exists with appropriate tables."""
-    conn = sqlite3.connect(USER_DB)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """DEPRECATED - Tables are created by SQLAlchemy"""
+    pass
 
 def init_cart_db():
-    """Ensure cart database exists with appropriate tables."""
-    conn = sqlite3.connect(USER_DB)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS carts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cart_name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            items TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """DEPRECATED - Tables are created by SQLAlchemy"""
+    pass
 
 def get_db_connection(db_name: str, city: str, snif_key: str):
-    """Get a database connection for a specific store."""
-    db_path = os.path.join(DBS[db_name], city, f"{snif_key}.db")
-    
-    if not os.path.exists(db_path):
-        raise HTTPException(status_code=404, detail=f"Database for snif_key '{snif_key}' in {city} not found.")
-    
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """DEPRECATED - Use SQLAlchemy session instead"""
+    raise NotImplementedError("This function is deprecated. Use SQLAlchemy session instead.")
+
+# New helper functions for PostgreSQL
+def get_store_by_snif_key(db: Session, snif_key: str) -> Store:
+    """Get a store by its snif_key"""
+    store = db.query(Store).filter(Store.snif_key == snif_key).first()
+    if not store:
+        raise HTTPException(status_code=404, detail=f"Store {snif_key} not found")
+    return store
+
+def get_stores_by_city(db: Session, city: str, chain: str = None) -> list[Store]:
+    """Get all stores in a city, optionally filtered by chain"""
+    query = db.query(Store).filter(Store.city == city)
+    if chain:
+        query = query.filter(Store.chain == chain)
+    return query.all()
+
+def get_prices_by_store(db: Session, store_id: int, limit: int = None) -> list[Price]:
+    """Get prices for a specific store"""
+    query = db.query(Price).filter(Price.store_id == store_id)
+    if limit:
+        query = query.limit(limit)
+    return query.all()
