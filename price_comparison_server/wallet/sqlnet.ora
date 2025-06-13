@@ -1,0 +1,3 @@
+WALLET_LOCATION = (SOURCE = (METHOD = file) (METHOD_DATA = (DIRECTORY="/Users/itay/Documents/GitHub/Price-Comparison/price_comparison_server/wallet")))
+SSL_SERVER_DN_MATCH=yes
+SSL_SERVER_CERT_DN_MATCH=yes
