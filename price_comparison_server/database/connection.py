@@ -7,15 +7,19 @@ from .models import Base
 
 # Get database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")
+print(f"DATABASE_URL found: {DATABASE_URL is not None}")  # Add this debug line
 
 # Handle Railway's postgres:// URL format
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    print(f"Converted to postgresql:// format")  # Add this debug line
 
 # Fallback for local development
 if not DATABASE_URL:
     DATABASE_URL = "sqlite:///./users.db"
     print("WARNING: No DATABASE_URL found, using SQLite for development")
+
+print(f"Using database: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else DATABASE_URL}")  # Add this (hides password)
 
 # Create engine
 if "postgresql" in DATABASE_URL:
@@ -38,8 +42,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     """Initialize database tables"""
-    Base.metadata.create_all(bind=engine)
-    print("Database tables created successfully!")
+    try:
+        print("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        print("Database tables created successfully!")
+    except Exception as e:
+        print(f"Error creating tables: {str(e)}")
+        raise
 
 @contextmanager
 def get_db():
