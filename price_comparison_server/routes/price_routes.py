@@ -3,9 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 import os
 import sys
-from typing import List, Dict, Any, Set, Optional, Tuple
+from typing import List, Dict, Any, Set, Optional
 import logging
-from dataclasses import dataclass
 from collections import defaultdict
 
 # Configure logging
@@ -22,103 +21,21 @@ from models.data_models import Price as PriceModel, CartRequest, CartItem
 from database.connection import get_db_session
 from database.models import Store, Price, User, Cart, CartItem as DBCartItem
 
-# Import search function for advanced product matching
-from services.search_service import search_products_by_name_and_city
+# Import the new Oracle-compatible search service
+from services.oracle_search_service import (
+    search_products_by_name_and_city_with_db,
+    calculate_cheapest_cart,
+    parse_query
+)
 
 # Create router
 router = APIRouter(tags=["prices"])
-
-
-@dataclass
-class StoreInventory:
-    """Tracks inventory and prices for a single store"""
-    chain: str
-    store_id: str
-    items: Dict[str, float]  # item_name -> best_price
-    
-    @property
-    def store_key(self) -> str:
-        return f"{self.chain}:{self.store_id}"
-    
-    def has_all_items(self, required_items: List[str]) -> bool:
-        return all(item in self.items for item in required_items)
-    
-    def calculate_total(self, cart_items: List[CartItem]) -> float:
-        total = 0.0
-        for item in cart_items:
-            if item.item_name in self.items:
-                total += self.items[item.item_name] * item.quantity
-            else:
-                return float('inf')  # Missing item
-        return total
-
-@dataclass
-class PriceEntry:
-    """Represents a single price entry from search results"""
-    chain: str
-    store_id: str
-    price: float
-    item_name: str
-
-# ============= Helper Functions =============
-
-def extract_price_entries(search_result: Dict[str, Any]) -> List[PriceEntry]:
-    """
-    Extract price entries from both old and new format search results.
-    Handles cross-chain products (with prices array) and single-chain products.
-    """
-    entries = []
-    
-    # Check for cross-chain product (new format)
-    if 'prices' in search_result and isinstance(search_result['prices'], list):
-        for price_info in search_result['prices']:
-            chain = price_info.get('chain')
-            store_id = price_info.get('store_id')
-            price = price_info.get('price', 0)
-            
-            if chain and store_id and price > 0:
-                entries.append(PriceEntry(
-                    chain=chain,
-                    store_id=store_id,
-                    price=price,
-                    item_name=search_result.get('item_name', '')
-                ))
-    
-    # Check for single-chain product (old format)
-    elif all(key in search_result for key in ['chain', 'store_id']):
-        chain = search_result.get('chain')
-        store_id = search_result.get('store_id')
-        price = search_result.get('price', search_result.get('item_price', 0))
-        
-        if chain and store_id and price > 0:
-            entries.append(PriceEntry(
-                chain=chain,
-                store_id=store_id,
-                price=price,
-                item_name=search_result.get('item_name', '')
-            ))
-    
-    return entries
-
-def get_available_cities() -> Dict[str, List[str]]:
-    """Get all available cities grouped by chain"""
-    cities = defaultdict(list)
-    
-    for chain_name, chain_path in DBS.items():
-        if os.path.exists(chain_path):
-            for city in os.listdir(chain_path):
-                city_path = os.path.join(chain_path, city)
-                if os.path.isdir(city_path):
-                    cities[chain_name].append(city)
-    
-    return dict(cities)
 
 # ============= Basic Price Endpoints =============
 
 @router.get("/prices/{chain_name}/store/{snif_key}", response_model=List[PriceModel])
 def get_prices_by_store(chain_name: str, snif_key: str, db: Session = Depends(get_db_session)):
     """Get all prices for a specific store"""
-    # Find the store
     store = db.query(Store).filter(
         Store.chain == chain_name,
         Store.snif_key == snif_key
@@ -127,10 +44,8 @@ def get_prices_by_store(chain_name: str, snif_key: str, db: Session = Depends(ge
     if not store:
         raise HTTPException(status_code=404, detail=f"Store {snif_key} not found in {chain_name}")
 
-    # Get prices for this store
     prices = db.query(Price).filter(Price.store_id == store.id).all()
 
-    # Convert to response format
     return [{
         "snif_key": store.snif_key,
         "item_code": p.item_code,
@@ -142,7 +57,6 @@ def get_prices_by_store(chain_name: str, snif_key: str, db: Session = Depends(ge
 @router.get("/prices/{chain_name}/item_code/{item_code}", response_model=List[PriceModel])
 def get_prices_by_item_code(chain_name: str, item_code: str, db: Session = Depends(get_db_session)):
     """Get all prices for a specific item code across all stores"""
-    # Join prices with stores to filter by chain
     results = db.query(Price, Store).join(Store).filter(
         Store.chain == chain_name,
         Price.item_code == item_code
@@ -170,14 +84,12 @@ def get_cities_list(db: Session = Depends(get_db_session)):
 @router.get("/cities-list-with-stores")
 def get_cities_list_with_stores(db: Session = Depends(get_db_session)):
     """Get cities with store count information"""
-    # Query to count stores by city and chain
     results = db.query(
         Store.city,
         Store.chain,
         func.count(Store.id).label('count')
     ).group_by(Store.city, Store.chain).all()
 
-    # Format the response
     cities_data = defaultdict(lambda: {'shufersal': 0, 'victory': 0})
     for city, chain, count in results:
         cities_data[city][chain] = count
@@ -190,29 +102,140 @@ def get_cities_list_with_stores(db: Session = Depends(get_db_session)):
         if counts['victory'] > 0:
             store_info.append(f"{counts['victory']} victory")
         formatted_cities.append(f"{city}: {', '.join(store_info)}")
-    
+
     return formatted_cities
 
-# ============= Search Endpoints (Temporary) =============
+# ============= Search Endpoints =============
 
 @router.get("/prices/by-item/{city}/{item_name}")
 def search_products(city: str, item_name: str,
                    group_by_code: bool = Query(True),
                    limit: int = Query(50),
                    db: Session = Depends(get_db_session)):
-    """Temporary implementation - returns empty results"""
-    logger.warning(f"Search not implemented yet for PostgreSQL: {item_name} in {city}")
-    return []
+    """
+    Search for products by name in a specific city
+    Now using the new Oracle-compatible search service
+    """
+    logger.info(f"Search request: '{item_name}' in {city}")
+
+    try:
+        # Use the new search function
+        results = search_products_by_name_and_city_with_db(
+            db, city, item_name, group_by_code
+        )
+
+        # Limit results
+        if limit and limit < len(results):
+            results = results[:limit]
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+@router.get("/prices/identical-products/{city}/{item_name}")
+def get_identical_products(city: str, item_name: str,
+                          limit: int = Query(50),
+                          db: Session = Depends(get_db_session)):
+    """
+    Get identical products (by item code) across different chains
+    """
+    logger.info(f"Searching for identical products: '{item_name}' in {city}")
+
+    try:
+        # Use grouped search
+        all_results = search_products_by_name_and_city_with_db(
+            db, city, item_name, group_by_code=True
+        )
+
+        # Filter to only cross-chain products
+        identical_products = [
+            product for product in all_results
+            if product.get('cross_chain', False)
+        ]
+
+        # Sort by savings
+        identical_products.sort(key=lambda p: (
+            p.get('price_comparison', {}).get('savings', 0) if p.get('price_comparison') else 0
+        ), reverse=True)
+
+        # Limit results
+        if limit:
+            identical_products = identical_products[:limit]
+
+        return identical_products
+
+    except Exception as e:
+        logger.error(f"Identical products search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+# ============= Cart Endpoints =============
 
 @router.post("/cheapest-cart-all-chains")
 def find_cheapest_cart(cart_request: CartRequest, db: Session = Depends(get_db_session)):
-    """Temporary implementation"""
-    logger.warning("Cheapest cart calculation not implemented for PostgreSQL yet")
-    return {
-        "error": "This feature is being migrated to PostgreSQL",
-        "city": cart_request.city,
-        "items": cart_request.items
-    }
+    """
+    Find the cheapest store for a shopping cart
+    Now using the new Oracle-compatible calculation
+    """
+    logger.info(f"Cheapest cart request for {len(cart_request.items)} items in {cart_request.city}")
+
+    try:
+        # Convert cart items to the format expected by the function
+        cart_items = [
+            {
+                'item_name': item.item_name,
+                'quantity': item.quantity
+            }
+            for item in cart_request.items
+        ]
+
+        # Use the new calculation function
+        result = calculate_cheapest_cart(db, cart_request.city, cart_items)
+
+        # Check for errors
+        if 'error' in result:
+            raise HTTPException(status_code=404, detail=result['error'])
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cheapest cart calculation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Calculation error: {str(e)}")
+
+# ============= Statistics Endpoints =============
+
+@router.get("/statistics/overview")
+def get_statistics(db: Session = Depends(get_db_session)):
+    """Get database statistics"""
+    try:
+        stats = {
+            'total_stores': db.query(Store).count(),
+            'total_prices': db.query(Price).count(),
+            'total_cities': db.query(func.count(func.distinct(Store.city))).scalar(),
+            'chains': {}
+        }
+
+        # Get stats by chain
+        chain_stats = db.query(
+            Store.chain,
+            func.count(func.distinct(Store.id)).label('stores'),
+            func.count(Price.id).label('prices')
+        ).outerjoin(Price).group_by(Store.chain).all()
+
+        for chain, stores, prices in chain_stats:
+            stats['chains'][chain] = {
+                'stores': stores,
+                'prices': prices
+            }
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Statistics error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Statistics error: {str(e)}")
 
 # ============= Health Check =============
 
@@ -223,15 +246,16 @@ def health_check(db: Session = Depends(get_db_session)):
         # Test database connection
         db.execute("SELECT 1")
 
-        # Count records
-        store_count = db.query(Store).count()
-        price_count = db.query(Price).count()
+        # Check if we have data
+        has_stores = db.query(Store).first() is not None
+        has_prices = db.query(Price).first() is not None
 
         return {
             "status": "healthy",
             "database": "connected",
-            "stores": store_count,
-            "prices": price_count
+            "has_stores": has_stores,
+            "has_prices": has_prices,
+            "database_type": "Oracle" if os.getenv("USE_ORACLE", "false").lower() == "true" else "PostgreSQL/SQLite"
         }
     except Exception as e:
         return {
