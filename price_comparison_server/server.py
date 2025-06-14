@@ -10,20 +10,26 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import database models and connection
-from database.connection import get_db
+from database.connection import get_db, engine
 from database.models import Store, Price
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 def get_store_city(snif_key):
     chain_id = snif_key.split('-')[0]
     sub_chain_id = snif_key.split('-')[1]
     store_id = snif_key.split('-')[2]
-    
+
     store_cities = {
     "7290027600007": {  # Shufersal
         "001": "Tel Aviv",  # שלי ת"א- בן יהודה
@@ -524,7 +530,7 @@ def get_store_city(snif_key):
     }
     return store_cities.get(chain_id, {}).get(store_id, "Unknown")
 
-def get_or_create_store(db_session, snif_key: str, chain: str) -> Store:
+def get_or_create_store(db_session: Session, snif_key: str, chain: str) -> Store:
     """Get existing store or create new one"""
     store = db_session.query(Store).filter(Store.snif_key == snif_key).first()
 
@@ -542,7 +548,9 @@ def get_or_create_store(db_session, snif_key: str, chain: str) -> Store:
     return store
 
 def save_prices_to_db(chain: str, prices_data: List[tuple]):
-    """Save prices to PostgreSQL database with batching"""
+    """Save prices to database with optimized Oracle batching"""
+    USE_ORACLE = os.getenv("USE_ORACLE", "false").lower() == "true"
+
     with get_db() as db:
         try:
             # Group prices by store
@@ -560,8 +568,8 @@ def save_prices_to_db(chain: str, prices_data: List[tuple]):
                 # Delete old prices for this store
                 db.query(Price).filter(Price.store_id == store.id).delete()
 
-                # Add new prices in batches
-                BATCH_SIZE = 100  # Insert 100 items at a time
+                # Batch size optimized for Oracle
+                BATCH_SIZE = 500 if USE_ORACLE else 1000
 
                 for i in range(0, len(store_prices), BATCH_SIZE):
                     batch = store_prices[i:i + BATCH_SIZE]
@@ -569,6 +577,10 @@ def save_prices_to_db(chain: str, prices_data: List[tuple]):
                     # Create price objects for this batch
                     price_objects = []
                     for item_code, item_name, item_price in batch:
+                        # Truncate item_name if it's too long for Oracle
+                        if USE_ORACLE and len(item_name) > 255:
+                            item_name = item_name[:252] + "..."
+
                         price = Price(
                             store_id=store.id,
                             item_code=item_code,
@@ -581,9 +593,14 @@ def save_prices_to_db(chain: str, prices_data: List[tuple]):
                     # Add batch to session
                     db.add_all(price_objects)
 
-                    # Commit after each batch
+                    # Commit after each batch for Oracle to avoid memory issues
+                    if USE_ORACLE:
+                        db.commit()
+                        logger.info(f"Saved batch {i//BATCH_SIZE + 1} for store {snif_key}")
+
+                # Final commit for non-Oracle databases
+                if not USE_ORACLE:
                     db.commit()
-                    logger.info(f"Saved batch {i//BATCH_SIZE + 1} for store {snif_key}")
 
                 logger.info(f"Saved total {len(store_prices)} items for store {snif_key}")
 
@@ -597,44 +614,80 @@ def save_prices_to_db(chain: str, prices_data: List[tuple]):
 
 # Function to download and extract GZ file
 def download_and_extract_gz(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        with gzip.GzipFile(fileobj=BytesIO(response.content)) as f:
-            return f.read()  # Return raw XML content
-    print(f"❌ Failed to download: {url}")
-    return None
+    try:
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            with gzip.GzipFile(fileobj=BytesIO(response.content)) as f:
+                return f.read()  # Return raw XML content
+        logger.error(f"Failed to download: {url} - Status: {response.status_code}")
+        return None
+    except Exception as e:
+        logger.error(f"Error downloading {url}: {str(e)}")
+        return None
 
 # Function to parse Shufersal XML
 def parse_shufersal_xml(xml_content):
-    root = ET.fromstring(xml_content)
-    prices_data = []
+    try:
+        root = ET.fromstring(xml_content)
+        prices_data = []
 
-    for item in root.findall(".//Item"):
-        snif_key = f"{root.find('ChainId').text}-{root.find('SubChainId').text}-{root.find('StoreId').text}"
-        item_code = item.find('ItemCode').text
-        item_name = item.find('ItemName').text
-        item_price = float(item.find('ItemPrice').text)
-        prices_data.append((snif_key, item_code, item_name, item_price))
+        chain_id = root.find('ChainId').text
+        sub_chain_id = root.find('SubChainId').text
+        store_id = root.find('StoreId').text
+        snif_key = f"{chain_id}-{sub_chain_id}-{store_id}"
 
-    return prices_data
+        for item in root.findall(".//Item"):
+            try:
+                item_code = item.find('ItemCode').text
+                item_name = item.find('ItemName').text
+                item_price_text = item.find('ItemPrice').text
+
+                # Skip items without valid price
+                if not item_price_text or float(item_price_text) <= 0:
+                    continue
+
+                item_price = float(item_price_text)
+                prices_data.append((snif_key, item_code, item_name, item_price))
+            except Exception as e:
+                logger.warning(f"Error parsing item in Shufersal XML: {str(e)}")
+                continue
+
+        return prices_data
+    except Exception as e:
+        logger.error(f"Error parsing Shufersal XML: {str(e)}")
+        return []
 
 # Function to parse Victory XML
 def parse_victory_xml(xml_content):
-    root = ET.fromstring(xml_content)
-    prices_data = []
+    try:
+        root = ET.fromstring(xml_content)
+        prices_data = []
 
-    chain_id = root.find("ChainID").text
-    sub_chain_id = root.find("SubChainID").text
-    store_id = root.find("StoreID").text
-    snif_key = f"{chain_id}-{sub_chain_id}-{store_id}"
+        chain_id = root.find("ChainID").text
+        sub_chain_id = root.find("SubChainID").text
+        store_id = root.find("StoreID").text
+        snif_key = f"{chain_id}-{sub_chain_id}-{store_id}"
 
-    for product in root.findall(".//Product"):
-        item_code = product.find("ItemCode").text
-        item_name = product.find("ItemName").text
-        item_price = float(product.find("ItemPrice").text)
-        prices_data.append((snif_key, item_code, item_name, item_price))
+        for product in root.findall(".//Product"):
+            try:
+                item_code = product.find("ItemCode").text
+                item_name = product.find("ItemName").text
+                item_price_text = product.find("ItemPrice").text
 
-    return prices_data
+                # Skip items without valid price
+                if not item_price_text or float(item_price_text) <= 0:
+                    continue
+
+                item_price = float(item_price_text)
+                prices_data.append((snif_key, item_code, item_name, item_price))
+            except Exception as e:
+                logger.warning(f"Error parsing product in Victory XML: {str(e)}")
+                continue
+
+        return prices_data
+    except Exception as e:
+        logger.error(f"Error parsing Victory XML: {str(e)}")
+        return []
 
 
 # Scraper for Shufersal
@@ -643,37 +696,46 @@ def scrape_shufersal():
     base_url = 'https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0&page='
     page_num = 1
     all_prices = []
+    max_pages = 21  # Limit pages
 
-    while page_num < 21:  # Limit pages as before
+    while page_num < max_pages:
         page_url = base_url + str(page_num)
-        response = requests.get(page_url)
 
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            links = soup.find_all('a', text='לחץ להורדה')
+        try:
+            response = requests.get(page_url, timeout=30)
 
-            if not links:
-                logger.info(f"No more pages at page {page_num}")
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                links = soup.find_all('a', text='לחץ להורדה')
+
+                if not links:
+                    logger.info(f"No more pages at page {page_num}")
+                    break
+
+                for link in links:
+                    download_url = link.get('href')
+                    if download_url:
+                        logger.info(f"Downloading: {download_url}")
+                        xml_content = download_and_extract_gz(download_url)
+                        if xml_content:
+                            prices_data = parse_shufersal_xml(xml_content)
+                            all_prices.extend(prices_data)
+
+                page_num += 1
+            else:
+                logger.error(f"Failed to fetch Shufersal page {page_num}")
                 break
 
-            for link in links:
-                download_url = link.get('href')
-                if download_url:
-                    logger.info(f"Downloading: {download_url}")
-                    xml_content = download_and_extract_gz(download_url)
-                    if xml_content:
-                        prices_data = parse_shufersal_xml(xml_content)
-                        all_prices.extend(prices_data)
-
-            page_num += 1
-        else:
-            logger.error(f"Failed to fetch Shufersal page {page_num}")
+        except Exception as e:
+            logger.error(f"Error processing Shufersal page {page_num}: {str(e)}")
             break
 
-    # Save all prices to PostgreSQL
+    # Save all prices to database
     if all_prices:
         save_prices_to_db('shufersal', all_prices)
         logger.info(f"Completed Shufersal scraping: {len(all_prices)} total prices")
+    else:
+        logger.warning("No prices found for Shufersal")
 
 
 def scrape_victory():
@@ -681,31 +743,69 @@ def scrape_victory():
     page_url = "https://laibcatalog.co.il/NBCompetitionRegulations.aspx?code=7290696200003&fileType=pricefull"
     all_prices = []
 
-    response = requests.get(page_url)
-    if response.status_code != 200:
-        logger.error("Failed to fetch Victory page")
-        return
+    try:
+        response = requests.get(page_url, timeout=30)
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch Victory page - Status: {response.status_code}")
+            return
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    links = soup.find_all('a', string='לחץ כאן להורדה')
+        soup = BeautifulSoup(response.text, 'html.parser')
+        links = soup.find_all('a', string='לחץ כאן להורדה')
 
-    if not links:
-        logger.error("No download links found for Victory")
-        return
+        if not links:
+            logger.error("No download links found for Victory")
+            return
 
-    base_url = "https://laibcatalog.co.il/"
+        base_url = "https://laibcatalog.co.il/"
 
-    for link in links:
-        relative_url = link.get('href')
-        if relative_url:
-            download_url = base_url + relative_url
-            logger.info(f"Downloading: {download_url}")
-            xml_content = download_and_extract_gz(download_url)
-            if xml_content:
-                prices_data = parse_victory_xml(xml_content)
-                all_prices.extend(prices_data)
+        for link in links:
+            relative_url = link.get('href')
+            if relative_url:
+                download_url = base_url + relative_url
+                logger.info(f"Downloading: {download_url}")
+                xml_content = download_and_extract_gz(download_url)
+                if xml_content:
+                    prices_data = parse_victory_xml(xml_content)
+                    all_prices.extend(prices_data)
 
-    # Save all prices to PostgreSQL
-    if all_prices:
-        save_prices_to_db('victory', all_prices)
-        logger.info(f"Completed Victory scraping: {len(all_prices)} total prices")
+        # Save all prices to database
+        if all_prices:
+            save_prices_to_db('victory', all_prices)
+            logger.info(f"Completed Victory scraping: {len(all_prices)} total prices")
+        else:
+            logger.warning("No prices found for Victory")
+
+    except Exception as e:
+        logger.error(f"Error in Victory scraping: {str(e)}")
+
+# Test function to verify database connection
+def test_db_connection():
+    """Test database connection and basic operations"""
+    try:
+        with get_db() as db:
+            # Test store creation
+            test_store = get_or_create_store(db, "TEST-001", "test")
+            logger.info(f"Test store created/found: {test_store.snif_key}")
+
+            # Test query
+            count = db.query(Store).count()
+            logger.info(f"Total stores in database: {count}")
+
+            # Cleanup
+            db.query(Store).filter(Store.snif_key == "TEST-001").delete()
+            db.commit()
+
+            logger.info("Database connection test passed!")
+            return True
+    except Exception as e:
+        logger.error(f"Database connection test failed: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    # Test database connection before scraping
+    if test_db_connection():
+        # Run scrapers
+        scrape_shufersal()
+        scrape_victory()
+    else:
+        logger.error("Database connection failed. Please check your configuration.")
