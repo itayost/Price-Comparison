@@ -137,9 +137,16 @@ def search_products(city: str, item_name: str,
 @router.get("/prices/identical-products/{city}/{item_name}")
 def get_identical_products(city: str, item_name: str,
                           limit: int = Query(50),
+                          cross_chain_only: bool = Query(False),
                           db: Session = Depends(get_db_session)):
     """
-    Get identical products (by item code) across different chains
+    Get identical products (by item code) across different stores
+
+    Args:
+        city: City to search in
+        item_name: Product name to search for
+        limit: Maximum results to return
+        cross_chain_only: If True, only show products available in multiple chains
     """
     logger.info(f"Searching for identical products: '{item_name}' in {city}")
 
@@ -149,20 +156,31 @@ def get_identical_products(city: str, item_name: str,
             db, city, item_name, group_by_code=True
         )
 
-        # Filter to only cross-chain products
-        identical_products = [
-            product for product in all_results
-            if product.get('cross_chain', False)
-        ]
+        # Filter to only multi-store products
+        if cross_chain_only:
+            # Only products in multiple chains
+            identical_products = [
+                product for product in all_results
+                if product.get('cross_chain', False)
+            ]
+        else:
+            # Any product in multiple stores (same chain or different chains)
+            identical_products = [
+                product for product in all_results
+                if product.get('multi_store', False)
+            ]
 
-        # Sort by savings
+        # Sort by savings potential
         identical_products.sort(key=lambda p: (
-            p.get('price_comparison', {}).get('savings', 0) if p.get('price_comparison') else 0
-        ), reverse=True)
+            -p.get('store_count', 1),  # More stores first
+            -p.get('price_comparison', {}).get('savings', 0)  # Higher savings first
+        ))
 
         # Limit results
         if limit:
             identical_products = identical_products[:limit]
+
+        logger.info(f"Found {len(identical_products)} identical products")
 
         return identical_products
 

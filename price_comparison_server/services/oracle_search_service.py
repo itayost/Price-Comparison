@@ -300,81 +300,134 @@ def search_in_database(db: Session, city: str, query_info: QueryInfo,
     return results
 
 def group_products_by_item_code(products: List[SearchResult]) -> List[Dict[str, Any]]:
-    """Group products by item code to identify identical products across chains"""
+    """
+    Group products by item code to identify identical products across stores
+    This includes products in different stores of the same chain
+    """
     # Group by item code
     item_code_groups = defaultdict(list)
     products_without_code = []
-    
+
     for product in products:
         if product.item_code and product.item_code.strip() not in ('0', ''):
             item_code_groups[product.item_code.strip()].append(product)
         else:
             products_without_code.append(product)
-    
+
     logger.info(f"Grouping {len(products)} products into {len(item_code_groups)} item code groups")
-    
+
     grouped_results = []
-    
+
     # Process products with same item code
     for item_code, group_products in item_code_groups.items():
-        chains = set(p.chain for p in group_products)
-        
-        if len(chains) > 1:
-            # Cross-chain product
-            logger.debug(f"Cross-chain product {item_code} found in: {chains}")
-            
-            # Choose best product name
+        # Get unique stores for this product
+        unique_stores = set()
+        chains = set()
+        for p in group_products:
+            unique_stores.add(f"{p.chain}:{p.store_id}")
+            chains.add(p.chain)
+
+        # If product appears in multiple stores OR multiple chains
+        if len(unique_stores) > 1:
+            logger.debug(f"Multi-store product {item_code} found in {len(unique_stores)} stores across {len(chains)} chains")
+
+            # Choose best product name (highest relevance score)
             base_product = max(group_products, key=lambda p: p.relevance_score)
-            
+
             merged_product = {
                 'item_name': base_product.item_name,
                 'item_code': item_code,
                 'prices': [],
-                'cross_chain': True,
+                'cross_chain': len(chains) > 1,  # True only if multiple chains
+                'multi_store': True,  # True if multiple stores (same or different chains)
+                'store_count': len(unique_stores),
+                'chain_count': len(chains),
                 'relevance_score': max(p.relevance_score for p in group_products)
             }
-            
-            # Add all prices
+
+            # Add all prices from all stores
+            seen_stores = set()
             for product in group_products:
-                merged_product['prices'].append({
-                    'chain': product.chain,
-                    'store_id': product.store_id,
-                    'price': product.price,
-                    'original_name': product.item_name,
-                    'timestamp': product.timestamp
-                })
-            
-            # Sort prices
+                store_key = f"{product.chain}:{product.store_id}"
+                # Avoid duplicates from the same store
+                if store_key not in seen_stores:
+                    seen_stores.add(store_key)
+                    merged_product['prices'].append({
+                        'chain': product.chain,
+                        'store_id': product.store_id,
+                        'price': product.price,
+                        'original_name': product.item_name,
+                        'timestamp': product.timestamp,
+                        'city': product.city
+                    })
+
+            # Sort prices (lowest first)
             merged_product['prices'].sort(key=lambda p: p['price'])
-            
-            # Add price comparison
-            comparison = generate_cross_chain_comparison(merged_product)
-            if comparison:
-                merged_product['price_comparison'] = comparison
-            
-            # Copy optional attributes
+
+            # Add price comparison data
+            if len(merged_product['prices']) > 1:
+                lowest_price = merged_product['prices'][0]
+                highest_price = merged_product['prices'][-1]
+
+                savings = highest_price['price'] - lowest_price['price']
+                savings_percent = (savings / highest_price['price']) * 100 if highest_price['price'] > 0 else 0
+
+                merged_product['price_comparison'] = {
+                    'best_deal': {
+                        'chain': lowest_price['chain'],
+                        'store_id': lowest_price['store_id'],
+                        'price': lowest_price['price'],
+                        'city': lowest_price.get('city', '')
+                    },
+                    'worst_deal': {
+                        'chain': highest_price['chain'],
+                        'store_id': highest_price['store_id'],
+                        'price': highest_price['price'],
+                        'city': highest_price.get('city', '')
+                    },
+                    'savings': savings,
+                    'savings_percent': savings_percent,
+                    'price_range': {
+                        'min': lowest_price['price'],
+                        'max': highest_price['price'],
+                        'avg': sum(p['price'] for p in merged_product['prices']) / len(merged_product['prices'])
+                    }
+                }
+
+            # Copy optional attributes from base product
             if base_product.price_per_unit is not None:
                 merged_product['price_per_unit'] = base_product.price_per_unit
             if base_product.unit is not None:
                 merged_product['unit'] = base_product.unit
             if base_product.weight is not None:
                 merged_product['weight'] = base_product.weight
-            
+
             grouped_results.append(merged_product)
         else:
-            # Single chain products
+            # Single store product - add individually
             for product in group_products:
-                grouped_results.append(product.to_dict())
-    
+                result_dict = product.to_dict()
+                result_dict['multi_store'] = False
+                result_dict['store_count'] = 1
+                result_dict['chain_count'] = 1
+                grouped_results.append(result_dict)
+
     # Add products without codes
     for product in products_without_code:
-        grouped_results.append(product.to_dict())
-    
-    # Sort results
+        result_dict = product.to_dict()
+        result_dict['multi_store'] = False
+        result_dict['store_count'] = 1
+        result_dict['chain_count'] = 1
+        grouped_results.append(result_dict)
+
+    # Sort results: multi-store products first, then by relevance
     grouped_results.sort(key=lambda p: (
-        -1 if p.get('cross_chain', False) else 0,
+        -1 if p.get('multi_store', False) else 0,
+        -p.get('store_count', 1),  # More stores = higher priority
         -p.get('relevance_score', 0)
     ))
+
+    logger.info(f"Grouped results: {len([r for r in grouped_results if r.get('multi_store')])} multi-store products")
     
     return grouped_results
 

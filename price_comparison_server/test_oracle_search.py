@@ -10,12 +10,12 @@ from typing import Dict, Any, List
 
 # API Configuration
 # Update this with your Railway URL
-API_BASE_URL = "https://price-comparison-production-3906.up.railway.app/"  # Replace with your actual Railway URL
+API_BASE_URL = "https://price-comparison-production-3906.up.railway.app"  # Replace with your actual Railway URL
 TEST_CITY = "Tel Aviv"
 
 # You can also use environment variable
 import os
-API_BASE_URL = os.getenv("RAILWAY_API_URL", "https://price-comparison-production-3906.up.railway.app/")
+API_BASE_URL = os.getenv("RAILWAY_API_URL", "https://price-comparison-production-3906.up.railway.app")
 
 # ANSI color codes for output
 class Colors:
