@@ -1,5 +1,3 @@
-# price_comparison_server/parsers/shufersal_parser.py
-
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any
 from .base_parser import BaseChainParser
@@ -9,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class ShufersalParser(BaseChainParser):
-    """Parser for Shufersal chain data"""
+    """Parser for Shufersal chain data - Fixed for actual XML structure"""
     
     def __init__(self):
         super().__init__('shufersal', '7290027600007')
@@ -21,61 +19,73 @@ class ShufersalParser(BaseChainParser):
         """Get Shufersal store file URLs"""
         return self.scrape_file_list(
             self.stores_list_url,
-            {'tag': 'a', 'attrs': {'text': 'לחץ להורדה'}},
-            'StoresFull'
+            {'tag': 'a', 'text': 'לחץ להורדה'},  # Fixed: use text directly
+            'Stores'  # Look for Stores in URL
         )
     
     def get_price_file_urls(self) -> List[str]:
         """Get Shufersal price file URLs"""
         return self.scrape_file_list(
             self.prices_list_url,
-            {'tag': 'a', 'attrs': {'text': 'לחץ להורדה'}},
-            'PriceFull'
+            {'tag': 'a', 'text': 'לחץ להורדה'},
+            'Price'
         )
     
     def parse_store_data(self, xml_content: bytes) -> List[Dict[str, Any]]:
-        """Parse Shufersal store XML format"""
+        """Parse Shufersal store XML format - Fixed for SAP/ABAP format"""
         stores = []
         
         try:
+            # Parse XML with namespace handling
             root = ET.fromstring(xml_content)
             
-            # Get chain info from root
-            chain_id = root.find('.//ChainID').text if root.find('.//ChainID') is not None else self.chain_id
+            # Define namespace
+            ns = {'asx': 'http://www.sap.com/abapxml'}
             
-            # Parse each store
-            for store in root.findall('.//Store'):
+            # Get chain ID from root
+            chain_id_elem = root.find('.//CHAINID', ns)
+            if chain_id_elem is None:
+                chain_id_elem = root.find('.//CHAINID')
+            chain_id = chain_id_elem.text if chain_id_elem is not None else self.chain_id
+            
+            # Find all stores - try with and without namespace
+            store_elements = root.findall('.//STORE', ns)
+            if not store_elements:
+                store_elements = root.findall('.//STORE')
+            
+            logger.info(f"Found {len(store_elements)} store elements in Shufersal XML")
+            
+            for store in store_elements:
                 try:
-                    store_id = store.find('StoreID').text if store.find('StoreID') is not None else None
-                    sub_chain_id = store.find('SubChainID').text if store.find('SubChainID') is not None else '001'
-                    
-                    if not store_id:
+                    # Extract store data - Shufersal uses uppercase field names
+                    store_id = store.find('STOREID')
+                    if store_id is None or not store_id.text:
                         continue
-                        
+                    
                     store_data = {
                         'chain_id': chain_id,
-                        'store_id': store_id,
-                        'sub_chain_id': sub_chain_id,
-                        'full_store_id': f"{chain_id}-{sub_chain_id}-{store_id}",
-                        'store_name': store.find('StoreName').text if store.find('StoreName') is not None else None,
-                        'address': store.find('Address').text if store.find('Address') is not None else None,
-                        'city': store.find('City').text if store.find('City') is not None else None,
-                        'store_type': store.find('StoreType').text if store.find('StoreType') is not None else None,
+                        'store_id': store_id.text.strip(),
+                        'sub_chain_id': store.find('SUBCHAINID').text if store.find('SUBCHAINID') is not None else '1',
+                        'store_name': store.find('STORENAME').text if store.find('STORENAME') is not None else f"Store {store_id.text}",
+                        'address': store.find('ADDRESS').text if store.find('ADDRESS') is not None else "Unknown",
+                        'city': store.find('CITY').text.strip() if store.find('CITY') is not None and store.find('CITY').text else "Unknown",
+                        'store_type': store.find('STORETYPE').text if store.find('STORETYPE') is not None else None,
                     }
                     
-                    # Clean city name
-                    if store_data['city']:
-                        store_data['city'] = store_data['city'].strip()
-                        
+                    # Create full store ID
+                    store_data['full_store_id'] = f"{chain_id}-{store_data['sub_chain_id']}-{store_data['store_id']}"
+                    
                     stores.append(store_data)
+                    logger.debug(f"Parsed Shufersal store: {store_data['store_id']} - {store_data['store_name']}")
                     
                 except Exception as e:
-                    logger.warning(f"Error parsing Shufersal store: {e}")
+                    logger.warning(f"Error parsing Shufersal store element: {e}")
                     continue
                     
         except Exception as e:
             logger.error(f"Error parsing Shufersal store XML: {e}")
             
+        logger.info(f"Successfully parsed {len(stores)} Shufersal stores")
         return stores
     
     def parse_price_data(self, xml_content: bytes) -> List[Dict[str, Any]]:
@@ -85,50 +95,77 @@ class ShufersalParser(BaseChainParser):
         try:
             root = ET.fromstring(xml_content)
             
-            # Get store info
-            chain_id = root.find('ChainId').text if root.find('ChainId') is not None else None
-            sub_chain_id = root.find('SubChainId').text if root.find('SubChainId') is not None else None
-            store_id = root.find('StoreId').text if root.find('StoreId') is not None else None
+            # Get store info - Shufersal format
+            store_id = None
+            for field in ['StoreId', 'StoreID', 'STOREID']:
+                elem = root.find(f'.//{field}')
+                if elem is not None and elem.text:
+                    store_id = elem.text.strip()
+                    break
             
-            if not all([chain_id, store_id]):
-                logger.error("Missing store identification in price file")
+            if not store_id:
+                logger.warning("No store ID found in Shufersal price file")
                 return prices
-                
-            full_store_id = f"{chain_id}-{sub_chain_id}-{store_id}"
             
-            # Parse each item
-            for item in root.findall('.//Item'):
+            # Find products - try different paths
+            products = root.findall('.//Product')
+            if not products:
+                products = root.findall('.//Item')
+            if not products:
+                products = root.findall('.//PRODUCT')
+                
+            logger.info(f"Found {len(products)} products in Shufersal price file for store {store_id}")
+            
+            for product in products:
                 try:
-                    item_code = item.find('ItemCode').text if item.find('ItemCode') is not None else None
-                    item_name = item.find('ItemName').text if item.find('ItemName') is not None else None
-                    item_price = item.find('ItemPrice').text if item.find('ItemPrice') is not None else None
+                    # Get barcode
+                    barcode = None
+                    for field in ['ItemCode', 'Barcode', 'ITEMCODE', 'BARCODE']:
+                        elem = product.find(field)
+                        if elem is not None and elem.text:
+                            barcode = elem.text.strip()
+                            break
                     
-                    if not all([item_code, item_name, item_price]):
+                    if not barcode:
                         continue
                     
-                    # Skip items with invalid prices
-                    try:
-                        price_float = float(item_price)
-                        if price_float <= 0:
-                            continue
-                    except:
+                    # Get name
+                    name = None
+                    for field in ['ItemName', 'ProductName', 'ITEMNAME', 'PRODUCTNAME']:
+                        elem = product.find(field)
+                        if elem is not None and elem.text:
+                            name = elem.text.strip()
+                            break
+                    
+                    # Get price
+                    price = None
+                    for field in ['ItemPrice', 'Price', 'ITEMPRICE', 'PRICE']:
+                        elem = product.find(field)
+                        if elem is not None and elem.text:
+                            try:
+                                price = float(elem.text.strip())
+                                break
+                            except ValueError:
+                                continue
+                    
+                    if price is None or price <= 0:
                         continue
                     
                     price_data = {
                         'store_id': store_id,
-                        'full_store_id': full_store_id,
-                        'barcode': item_code,
-                        'name': item_name.strip(),
-                        'price': price_float
+                        'barcode': barcode,
+                        'name': name or f"Product {barcode}",
+                        'price': price
                     }
                     
                     prices.append(price_data)
                     
                 except Exception as e:
-                    logger.warning(f"Error parsing Shufersal item: {e}")
+                    logger.debug(f"Error parsing Shufersal product: {e}")
                     continue
                     
         except Exception as e:
             logger.error(f"Error parsing Shufersal price XML: {e}")
             
+        logger.info(f"Successfully parsed {len(prices)} prices from Shufersal")
         return prices

@@ -63,7 +63,7 @@ class BaseChainParser(ABC):
         
         Args:
             list_url: URL of the page listing files
-            link_selector: Dict with 'tag' and 'attrs' for BeautifulSoup
+            link_selector: Dict with 'tag' and search parameters for BeautifulSoup
             file_type_identifier: String to identify the type of file
         """
         try:
@@ -73,7 +73,23 @@ class BaseChainParser(ABC):
                 return []
             
             soup = BeautifulSoup(response.text, 'html.parser')
-            links = soup.find_all(**link_selector)
+            
+            # Extract tag and search parameters
+            tag = link_selector.get('tag', 'a')
+            
+            # Handle different ways of specifying the search
+            if 'text' in link_selector:
+                # Use text parameter directly
+                links = soup.find_all(tag, text=link_selector['text'])
+            elif 'string' in link_selector:
+                # Use string parameter (newer BeautifulSoup)
+                links = soup.find_all(tag, string=link_selector['string'])
+            elif 'attrs' in link_selector:
+                # Use attributes
+                links = soup.find_all(tag, attrs=link_selector['attrs'])
+            else:
+                # Just find all tags
+                links = soup.find_all(tag)
             
             file_urls = []
             for link in links:
