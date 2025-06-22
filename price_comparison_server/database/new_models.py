@@ -197,6 +197,54 @@ class PriceHistory(Base):
         Index('idx_history_date', 'recorded_at'),
     )
 
+class User(Base):
+    """Users table for authentication"""
+    __tablename__ = 'users'
+
+    if USE_ORACLE:
+        user_id = Column(Integer, Sequence('user_id_seq'), primary_key=True)
+    else:
+        user_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    email = Column(String(255), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    saved_carts = relationship("SavedCart", back_populates="user", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<User(email='{self.email}')>"
+
+
+class SavedCart(Base):
+    """Saved shopping carts for users"""
+    __tablename__ = 'saved_carts'
+
+    if USE_ORACLE:
+        cart_id = Column(Integer, Sequence('cart_id_seq'), primary_key=True)
+    else:
+        cart_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
+    cart_name = Column(String(100), nullable=False)
+    city = Column(String(100))
+    items = Column(Text)  # JSON string: [{"barcode": "xxx", "quantity": 2, "name": "xxx"}, ...]
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="saved_carts")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('user_id', 'cart_name', name='uq_user_cart_name'),
+        Index('idx_saved_cart_user', 'user_id'),
+    )
+
+    def __repr__(self):
+        return f"<SavedCart(user_id={self.user_id}, cart_name='{self.cart_name}')>"
+
 
 # Helper functions for creating the schema
 def create_all_tables(engine):
