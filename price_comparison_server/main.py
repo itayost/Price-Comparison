@@ -9,6 +9,7 @@ from routes.cart_routes import router as cart_router
 from routes.auth_routes import router as auth_router
 from routes.saved_carts_routes import router as saved_carts_router
 from routes.system_routes import router as system_router
+from routes.product_routes import router as product_router
 # from routes.auth_routes import router as auth_router  # To be implemented
 # from routes.saved_carts_routes import router as saved_carts_router  # To be implemented
 
@@ -40,6 +41,7 @@ app.include_router(cart_router)
 app.include_router(auth_router)
 app.include_router(saved_carts_router)
 app.include_router(system_router)
+app.include_router(product_router)
 # app.include_router(auth_router)  # Uncomment when implemented
 # app.include_router(saved_carts_router)  # Uncomment when implemented
 
