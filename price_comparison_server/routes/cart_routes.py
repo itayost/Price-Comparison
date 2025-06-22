@@ -1,130 +1,194 @@
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from typing import List
-import sys
-import os
-import logging
+# price_comparison_server/routes/cart_routes.py
 
-logging.basicConfig(level=logging.INFO)
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+import logging
+from database.connection import SessionLocal
+
+def get_db():
+    """Database dependency for FastAPI"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+from services.cart_service import CartComparisonService, CartItem
+
 logger = logging.getLogger(__name__)
 
-if __name__ == "__main__":
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+router = APIRouter(prefix="/api/cart", tags=["cart"])
 
-from models.data_models import SaveCartRequest
-from database.connection import get_db_session
-from database.models import User, Cart, CartItem
-from services.search_service import search_products_by_name_and_city
 
-router = APIRouter(tags=["carts"])
+# Pydantic models for API
+class CartItemRequest(BaseModel):
+    barcode: str = Field(..., description="Product barcode")
+    quantity: int = Field(1, ge=1, description="Quantity (must be positive)")
+    name: Optional[str] = Field(None, description="Optional product name")
 
-@router.post("/save-cart")
-def save_cart(request: SaveCartRequest, db: Session = Depends(get_db_session)):
+
+class CartCompareRequest(BaseModel):
+    city: str = Field(..., description="City name (Hebrew or English)")
+    items: List[CartItemRequest] = Field(..., description="List of items in cart")
+
+
+class StoreResult(BaseModel):
+    branch_id: int
+    branch_name: str
+    branch_address: str
+    city: str
+    chain_name: str
+    chain_display_name: str
+    available_items: int
+    missing_items: int
+    total_price: float
+    items_detail: List[Dict[str, Any]]
+
+
+class CartComparisonResponse(BaseModel):
+    success: bool
+    total_items: int
+    city: str
+    cheapest_store: Optional[StoreResult]
+    all_stores: List[StoreResult]
+    comparison_time: str
+
+
+@router.post("/compare", response_model=CartComparisonResponse)
+def compare_cart_prices(request: CartCompareRequest, db: Session = Depends(get_db)):
+    """
+    Compare cart prices across all stores in a city.
+
+    Returns the cheapest store and price breakdown for all stores.
+    """
     try:
-        # Check if user exists
-        user = db.query(User).filter(User.email == request.email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        # Check if cart with same name exists
-        existing_cart = db.query(Cart).filter(
-            Cart.email == request.email,
-            Cart.cart_name == request.cart_name
-        ).first()
-
-        if existing_cart:
-            # Delete existing cart and items
-            db.query(CartItem).filter(CartItem.cart_id == existing_cart.id).delete()
-            db.delete(existing_cart)
-
-        # Create new cart
-        new_cart = Cart(
-            email=request.email,
-            cart_name=request.cart_name,
-            city=request.city
-        )
-        db.add(new_cart)
-        db.flush()  # Get the cart ID
-
-        # Add cart items
-        for item in request.items:
-            cart_item = CartItem(
-                cart_id=new_cart.id,
-                item_name=item.item_name,
-                quantity=item.quantity
+        # Convert request items to CartItem objects
+        cart_items = [
+            CartItem(
+                barcode=item.barcode,
+                quantity=item.quantity,
+                name=item.name
             )
-            db.add(cart_item)
+            for item in request.items
+        ]
 
-        db.commit()
-        return {"message": "Cart saved successfully"}
+        # Get comparison service
+        service = CartComparisonService(db)
 
-    except HTTPException as e:
-        raise e
+        # Compare prices
+        comparison = service.compare_cart(cart_items, request.city)
+
+        # Convert to response format
+        response = CartComparisonResponse(
+            success=True,
+            total_items=comparison.total_items,
+            city=comparison.city,
+            cheapest_store=StoreResult(
+                branch_id=comparison.cheapest_store.branch_id,
+                branch_name=comparison.cheapest_store.branch_name,
+                branch_address=comparison.cheapest_store.branch_address,
+                city=comparison.cheapest_store.city,
+                chain_name=comparison.cheapest_store.chain_name,
+                chain_display_name=comparison.cheapest_store.chain_display_name,
+                available_items=comparison.cheapest_store.available_items,
+                missing_items=comparison.cheapest_store.missing_items,
+                total_price=comparison.cheapest_store.total_price,
+                items_detail=comparison.cheapest_store.items_detail
+            ) if comparison.cheapest_store else None,
+            all_stores=[
+                StoreResult(
+                    branch_id=store.branch_id,
+                    branch_name=store.branch_name,
+                    branch_address=store.branch_address,
+                    city=store.city,
+                    chain_name=store.chain_name,
+                    chain_display_name=store.chain_display_name,
+                    available_items=store.available_items,
+                    missing_items=store.missing_items,
+                    total_price=store.total_price,
+                    items_detail=store.items_detail
+                )
+                for store in comparison.all_stores
+            ],
+            comparison_time=comparison.comparison_time.isoformat()
+        )
+
+        return response
+
     except Exception as e:
-        db.rollback()
-        logger.error(f"Error saving cart: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        logger.error(f"Error comparing cart: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to compare cart: {str(e)}")
 
-@router.get("/savedcarts/{email}")
-def get_saved_carts(email: str, city: str = None, db: Session = Depends(get_db_session)):
+
+@router.get("/product/{barcode}")
+def get_product_info(barcode: str, db: Session = Depends(get_db)):
+    """Get product information including price range across all stores"""
     try:
-        logger.info(f"Getting saved carts for email: {email}, city: {city}")
+        service = CartComparisonService(db)
+        product_info = service.get_product_info(barcode)
 
-        # Check if user exists
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            logger.warning(f"User not found: {email}")
-            raise HTTPException(status_code=404, detail="User not found")
+        if not product_info:
+            raise HTTPException(status_code=404, detail=f"Product with barcode {barcode} not found")
 
-        # Get user's carts
-        query = db.query(Cart).filter(Cart.email == email)
-        if city:
-            query = query.filter(Cart.city == city)
+        return {
+            "success": True,
+            "product": product_info
+        }
 
-        carts = query.all()
-        logger.info(f"Found {len(carts)} carts")
-
-        result = []
-        for cart in carts:
-            cart_data = {
-                "cart_name": cart.cart_name,
-                "city": cart.city,
-                "items": []
-            }
-
-            # Get cart items
-            for cart_item in cart.items:
-                item_data = {
-                    "item_name": cart_item.item_name,
-                    "quantity": cart_item.quantity,
-                    "price": None
-                }
-
-                # Try to get current price
-                if cart.city:
-                    try:
-                        search_results = search_products_by_name_and_city(
-                            cart.city,
-                            cart_item.item_name
-                        )
-                        if search_results:
-                            # Get price from first result
-                            first_result = search_results[0]
-                            if "price" in first_result:
-                                item_data["price"] = first_result["price"]
-                            elif "prices" in first_result and first_result["prices"]:
-                                item_data["price"] = first_result["prices"][0].get("price")
-                    except Exception as e:
-                        logger.error(f"Error getting price for {cart_item.item_name}: {str(e)}")
-
-                cart_data["items"].append(item_data)
-
-            result.append(cart_data)
-
-        return {"email": email, "saved_carts": result}
-
-    except HTTPException as e:
-        raise e
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting saved carts: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        logger.error(f"Error getting product info: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get product information")
+
+
+@router.get("/search")
+def search_products(query: str, limit: int = 20, db: Session = Depends(get_db)):
+    """Search for products by name or barcode"""
+    try:
+        if len(query) < 2:
+            raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+
+        service = CartComparisonService(db)
+        results = service.search_products(query, limit)
+
+        return {
+            "success": True,
+            "query": query,
+            "count": len(results),
+            "products": results
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching products: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to search products")
+
+
+# Sample cart for testing
+@router.get("/sample")
+def get_sample_cart():
+    """Get a sample cart for testing"""
+    return {
+        "city": "תל אביב",
+        "items": [
+            {
+                "barcode": "7290000000001",
+                "quantity": 2,
+                "name": "חלב 3%"
+            },
+            {
+                "barcode": "7290000000002",
+                "quantity": 1,
+                "name": "לחם אחיד"
+            },
+            {
+                "barcode": "7290000000003",
+                "quantity": 3,
+                "name": "ביצים L"
+            }
+        ]
+    }

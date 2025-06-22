@@ -2,5 +2,5 @@
 Service modules for the price comparison server.
 """
 
-# Import the original search service for backward compatibility
-from .search_service import search_products_by_name_and_city
+# Import only the new services that work
+# We'll add more as we implement them

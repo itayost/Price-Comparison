@@ -4,6 +4,8 @@ from sqlalchemy import (
     Column, Integer, String, Float, DateTime, ForeignKey, 
     UniqueConstraint, Index, Boolean, Enum, Text, Numeric, Sequence
 )
+from sqlalchemy import JSON
+from sqlalchemy.types import Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -216,7 +218,6 @@ class User(Base):
     def __repr__(self):
         return f"<User(email='{self.email}')>"
 
-
 class SavedCart(Base):
     """Saved shopping carts for users"""
     __tablename__ = 'saved_carts'
@@ -229,7 +230,13 @@ class SavedCart(Base):
     user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     cart_name = Column(String(100), nullable=False)
     city = Column(String(100))
-    items = Column(Text)  # JSON string: [{"barcode": "xxx", "quantity": 2, "name": "xxx"}, ...]
+
+    # Use JSON if available, otherwise Text
+    try:
+        items = Column(JSON)  # This should work with Oracle too
+    except:
+        items = Column(Text)  # Fallback to Text if JSON not supported
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
