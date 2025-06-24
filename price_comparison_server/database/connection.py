@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
-from .models import Base
+from .new_models import Base
 import logging
 from dotenv import load_dotenv
 
