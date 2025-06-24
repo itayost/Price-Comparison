@@ -1,7 +1,7 @@
-from .new_models import Base, Chain, Branch, Product, ChainProduct, BranchPrice, RuleType, ProductMatchingRule, PriceHistory, User, SavedCart
+from .new_models import Base, User, SavedCart, Chain, Branch, ChainProduct, BranchPrice, Product
 from .connection import engine, get_db, init_db, get_db_session
 
 __all__ = [
-    'Base', 'Chain', 'Branch', 'Product', 'ChainProduct', 'BranchPrice', 'RuleType', 'ProductMatchingRule', 'PriceHistory', 'User', 'SavedCart'
+    'Base', 'User', 'SavedCart', 'Chain', 'Branch', 'ChainProduct', 'BranchPrice', 'Product',
     'engine', 'get_db', 'init_db', 'get_db_session'
 ]

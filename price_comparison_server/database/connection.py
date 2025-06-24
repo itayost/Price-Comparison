@@ -120,7 +120,7 @@ def init_db():
 
         if USE_ORACLE:
             # For Oracle, create tables in specific order to handle constraints
-            from .models import User, Store, Cart, CartItem, Price
+            from .new_models import User, Chain, Branch, Product, ChainProduct, BranchPrice, SavedCart
 
             # Drop existing tables if needed (be careful in production!)
             if os.getenv("DROP_TABLES", "false").lower() == "true":
@@ -129,7 +129,8 @@ def init_db():
 
             # Create sequences first (Oracle specific)
             with engine.connect() as conn:
-                sequences = ['user_id_seq', 'store_id_seq', 'cart_id_seq', 'cart_item_id_seq', 'price_id_seq']
+                sequences = ['user_id_seq', 'chain_id_seq', 'branch_id_seq', 'product_id_seq',
+                           'chain_product_id_seq', 'price_id_seq', 'cart_id_seq']
                 for seq in sequences:
                     try:
                         conn.execute(text(f"CREATE SEQUENCE {seq}"))
@@ -145,17 +146,23 @@ def init_db():
             logger.info("Creating User table...")
             User.__table__.create(bind=engine, checkfirst=True)
 
-            logger.info("Creating Store table...")
-            Store.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Creating Chain table...")
+            Chain.__table__.create(bind=engine, checkfirst=True)
 
-            logger.info("Creating Cart table...")
-            Cart.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Creating Branch table...")
+            Branch.__table__.create(bind=engine, checkfirst=True)
 
-            logger.info("Creating CartItem table...")
-            CartItem.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Creating Product table...")
+            Product.__table__.create(bind=engine, checkfirst=True)
 
-            logger.info("Creating Price table...")
-            Price.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Creating ChainProduct table...")
+            ChainProduct.__table__.create(bind=engine, checkfirst=True)
+
+            logger.info("Creating BranchPrice table...")
+            BranchPrice.__table__.create(bind=engine, checkfirst=True)
+
+            logger.info("Creating SavedCart table...")
+            SavedCart.__table__.create(bind=engine, checkfirst=True)
 
         else:
             # For PostgreSQL/SQLite, use normal creation
