@@ -12,16 +12,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Check out your code
       - uses: actions/checkout@v4
 
-      # Set up Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Cache dependencies for faster builds
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
@@ -30,32 +27,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           cd price_comparison_server
+          echo "Current directory: $(pwd)"
+          echo "Files in directory:"
+          ls -la
+          echo "Installing requirements..."
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          echo "Installed packages:"
+          pip list
 
-      # Run tests with coverage
-      - name: Run tests with coverage
+      - name: Run tests
         run: |
           cd price_comparison_server
-          pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
-
-      # Upload coverage to Codecov (optional)
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          file: ./price_comparison_server/coverage.xml
-          fail_ci_if_error: false
-
-      # Save test results as artifacts (updated to v4)
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results
-          path: price_comparison_server/htmlcov/
+          # Set PYTHONPATH to include the current directory
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "Running tests..."
+          pytest tests/ -v --cov=. --cov-report=term --cov-report=html
