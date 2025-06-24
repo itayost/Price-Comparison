@@ -5,16 +5,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import logging
-from database.connection import SessionLocal
-
-def get_db():
-    """Database dependency for FastAPI"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+from database.connection import get_db_session
 from services.cart_service import CartComparisonService, CartItem
 
 logger = logging.getLogger(__name__)
@@ -57,7 +48,7 @@ class CartComparisonResponse(BaseModel):
 
 
 @router.post("/compare", response_model=CartComparisonResponse)
-def compare_cart_prices(request: CartCompareRequest, db: Session = Depends(get_db)):
+def compare_cart_prices(request: CartCompareRequest, db: Session = Depends(get_db_session)):
     """
     Compare cart prices across all stores in a city.
 
@@ -123,7 +114,7 @@ def compare_cart_prices(request: CartCompareRequest, db: Session = Depends(get_d
 
 
 @router.get("/product/{barcode}")
-def get_product_info(barcode: str, db: Session = Depends(get_db)):
+def get_product_info(barcode: str, db: Session = Depends(get_db_session)):
     """Get product information including price range across all stores"""
     try:
         service = CartComparisonService(db)
@@ -145,7 +136,7 @@ def get_product_info(barcode: str, db: Session = Depends(get_db)):
 
 
 @router.get("/search")
-def search_products(query: str, limit: int = 20, db: Session = Depends(get_db)):
+def search_products(query: str, limit: int = 20, db: Session = Depends(get_db_session)):
     """Search for products by name or barcode"""
     try:
         if len(query) < 2:

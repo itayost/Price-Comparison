@@ -10,7 +10,7 @@ import logging
 
 from services.auth_service import AuthService, ACCESS_TOKEN_EXPIRE_MINUTES
 from database.new_models import User
-from database.connection import SessionLocal
+from database.connection import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +18,6 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-
-# Database dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # Pydantic models
@@ -52,7 +43,7 @@ class UserResponse(BaseModel):
 
 
 # Dependency to get current user
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db_session)) -> User:
     """Get current user from JWT token"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -74,7 +65,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 
 @router.post("/register", response_model=UserResponse)
-def register(user_data: UserRegister, db: Session = Depends(get_db)):
+def register(user_data: UserRegister, db: Session = Depends(get_db_session)):
     """Register a new user"""
     try:
         auth_service = AuthService(db)
@@ -96,6 +87,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         )
 
     except ValueError as e:
+        # User already exists
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -109,7 +101,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db_session)):
     """Login with email and password"""
     try:
         auth_service = AuthService(db)

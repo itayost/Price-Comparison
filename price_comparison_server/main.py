@@ -3,6 +3,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import os
+
+# Initialize database
+from database.connection import init_db
 
 # Import routers
 from routes.cart_routes import router as cart_router
@@ -34,14 +38,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize database tables on startup
+@app.on_event("startup")
+def startup_event():
+    """Initialize database on startup"""
+    try:
+        if os.getenv("TESTING") != "true":  # Skip for tests
+            init_db()
+            logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
 # Include routers
 app.include_router(cart_router)
 app.include_router(auth_router)
 app.include_router(saved_carts_router)
 app.include_router(system_router)
 app.include_router(product_router)
-# app.include_router(auth_router)  # Uncomment when implemented
-# app.include_router(saved_carts_router)  # Uncomment when implemented
 
 @app.get("/")
 def root():
@@ -51,6 +64,10 @@ def root():
         "version": "2.0.0",
         "endpoints": {
             "cart": "/api/cart",
+            "auth": "/api/auth",
+            "products": "/api/products",
+            "saved-carts": "/api/saved-carts",
+            "system": "/api/system",
             "docs": "/docs",
             "redoc": "/redoc"
         }
