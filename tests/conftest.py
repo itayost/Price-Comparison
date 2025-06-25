@@ -1,5 +1,5 @@
 """
-Simplified test configuration that works with the actual database setup.
+Test configuration that prevents database initialization conflicts.
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -13,8 +13,8 @@ os.environ["TESTING"] = "true"
 os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["USE_ORACLE"] = "false"
 
-# Create test database engine
-TEST_DATABASE_URL = "sqlite:///:memory:"
+# Create a single test database that persists for all tests
+TEST_DATABASE_URL = "sqlite:///./test.db"  # Use file-based SQLite for persistence
 test_engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False}
@@ -26,25 +26,44 @@ import database.connection
 database.connection.engine = test_engine
 database.connection.SessionLocal = TestingSessionLocal
 
-# Import models and create tables
+# Import models
 from database.new_models import Base, Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
 
-# Create all tables
+# Create all tables once
+Base.metadata.drop_all(bind=test_engine)  # Clean slate
 Base.metadata.create_all(bind=test_engine)
-print(f"Tables created: {Base.metadata.tables.keys()}")
+print(f"Created tables: {list(Base.metadata.tables.keys())}")
 
 # Import app after database is set up
 from main import app
 from database.connection import get_db_session
 
 
+@pytest.fixture(scope="session")
+def setup_database():
+    """Set up database once for all tests"""
+    yield
+    # Cleanup after all tests
+    Base.metadata.drop_all(bind=test_engine)
+    if os.path.exists("test.db"):
+        os.remove("test.db")
+
+
 @pytest.fixture(scope="function")
-def db():
+def db(setup_database):
     """Create a database session for each test"""
-    # Each test gets its own connection/transaction
     connection = test_engine.connect()
     transaction = connection.begin()
     session = TestingSessionLocal(bind=connection)
+
+    # Clean all data before each test
+    session.query(BranchPrice).delete()
+    session.query(ChainProduct).delete()
+    session.query(Branch).delete()
+    session.query(Chain).delete()
+    session.query(SavedCart).delete()
+    session.query(User).delete()
+    session.commit()
 
     yield session
 
@@ -62,25 +81,24 @@ def client(db):
         finally:
             pass
 
-    # Override the main database dependency used by all routes
+    # Override all database dependencies
     app.dependency_overrides[get_db_session] = override_get_db
+
+    # Also override the SessionLocal that routes might use directly
+    original_session_local = database.connection.SessionLocal
+    database.connection.SessionLocal = lambda: db
 
     with TestClient(app) as test_client:
         yield test_client
 
+    # Restore original
+    database.connection.SessionLocal = original_session_local
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def sample_data(db):
-    """Create test data for each test"""
-    # Clean existing data
-    db.query(BranchPrice).delete()
-    db.query(ChainProduct).delete()
-    db.query(Branch).delete()
-    db.query(Chain).delete()
-    db.commit()
-
+    """Create test data"""
     # Create chains
     shufersal = Chain(name="shufersal", display_name="שופרסל")
     victory = Chain(name="victory", display_name="ויקטורי")
@@ -173,10 +191,6 @@ def sample_data(db):
 @pytest.fixture
 def auth_headers(client, db):
     """Create a test user and return auth headers"""
-    # Clean any existing test user
-    db.query(User).filter_by(email="test@example.com").delete()
-    db.commit()
-
     # Register user
     register_response = client.post("/api/auth/register", json={
         "email": "test@example.com",
