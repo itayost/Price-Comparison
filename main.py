@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import logging
 import os
 
@@ -22,11 +23,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+
+# Define lifespan event handler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events"""
+    # Startup
+    try:
+        if os.getenv("TESTING") != "true":  # Skip for tests
+            init_db()
+            logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
+    yield  # Server runs
+
+    # Shutdown (if needed)
+    logger.info("Shutting down...")
+
+
+# Create FastAPI app with lifespan
 app = FastAPI(
     title="Price Comparison API",
     description="Compare grocery prices across Israeli supermarket chains",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan  # Use lifespan instead of on_event
 )
 
 # Add CORS middleware
@@ -37,17 +58,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize database tables on startup
-@app.on_event("startup")
-def startup_event():
-    """Initialize database on startup"""
-    try:
-        if os.getenv("TESTING") != "true":  # Skip for tests
-            init_db()
-            logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
 
 # Include routers
 app.include_router(cart_router)

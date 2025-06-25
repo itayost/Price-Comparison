@@ -6,13 +6,14 @@ from sqlalchemy import (
 )
 from sqlalchemy import JSON
 from sqlalchemy.types import Text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 import os
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 # Check if we're using Oracle
 USE_ORACLE = os.getenv("USE_ORACLE", "false").lower() == "true"
