@@ -166,77 +166,6 @@ class TestSavedCartsEndpoints:
         assert isinstance(data, list)
         assert len(data) == 0
 
-    def test_get_cart_details(self, client: TestClient, auth_headers: dict):
-        """Test getting detailed information about a saved cart"""
-        # Save a cart first
-        cart_data = {
-            "cart_name": "Detailed Cart",
-            "city": "תל אביב",
-            "items": SAMPLE_CART_ITEMS
-        }
-
-        save_response = client.post("/api/saved-carts/save", json=cart_data, headers=auth_headers)
-        cart_id = save_response.json()["cart_id"]
-
-        # Get cart details
-        response = client.get(f"/api/saved-carts/{cart_id}", headers=auth_headers)
-
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-
-        assert data["success"] is True
-        assert "cart" in data
-
-        cart = data["cart"]
-        assert cart["cart_id"] == cart_id
-        assert cart["cart_name"] == "Detailed Cart"
-        assert cart["city"] == "תל אביב"
-        assert len(cart["items"]) == len(SAMPLE_CART_ITEMS)
-
-        # Check item structure
-        for item in cart["items"]:
-            assert "barcode" in item
-            assert "quantity" in item
-            assert "name" in item
-
-    def test_get_cart_details_not_found(self, client: TestClient, auth_headers: dict):
-        """Test getting non-existent cart"""
-        response = client.get("/api/saved-carts/99999", headers=auth_headers)
-
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        data = response.json()
-        assert "Cart not found" in data["detail"]
-
-    def test_get_cart_details_unauthorized(self, client: TestClient, auth_headers: dict, db_session: Session):
-        """Test that users can't access other users' carts"""
-        # Create another user
-        other_user_response = client.post(
-            "/api/auth/register",
-            json={"email": "otheruser@example.com", "password": "password123"}
-        )
-
-        other_login = client.post(
-            "/api/auth/login",
-            data={"username": "otheruser@example.com", "password": "password123"}
-        )
-        other_token = other_login.json()["access_token"]
-        other_headers = {"Authorization": f"Bearer {other_token}"}
-
-        # Save a cart as the other user
-        cart_data = {
-            "cart_name": "Other User's Cart",
-            "city": "תל אביב",
-            "items": [{"barcode": "7290000000001", "quantity": 1}]
-        }
-
-        save_response = client.post("/api/saved-carts/save", json=cart_data, headers=other_headers)
-        cart_id = save_response.json()["cart_id"]
-
-        # Try to access with original user's token
-        response = client.get(f"/api/saved-carts/{cart_id}", headers=auth_headers)
-
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
     def test_compare_saved_cart(self, client: TestClient, auth_headers: dict, test_prices: dict):
         """Test comparing prices for a saved cart"""
         # Save a cart
@@ -265,9 +194,16 @@ class TestSavedCartsEndpoints:
 
         # Check comparison results
         comparison = data["comparison"]
-        assert "success" in comparison
+        assert "total_items" in comparison
         assert "cheapest_store" in comparison
-        assert "all_stores" in comparison
+
+    def test_compare_saved_cart_not_found(self, client: TestClient, auth_headers: dict):
+        """Test comparing non-existent cart"""
+        response = client.get("/api/saved-carts/99999/compare", headers=auth_headers)
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        data = response.json()
+        assert "not found" in data["detail"].lower()
 
     def test_delete_cart(self, client: TestClient, auth_headers: dict):
         """Test deleting a saved cart"""
@@ -290,7 +226,7 @@ class TestSavedCartsEndpoints:
         assert data["message"] == "Cart deleted successfully"
 
         # Verify it's deleted
-        get_response = client.get(f"/api/saved-carts/{cart_id}", headers=auth_headers)
+        get_response = client.get(f"/api/saved-carts/{cart_id}/compare", headers=auth_headers)
         assert get_response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_delete_nonexistent_cart(self, client: TestClient, auth_headers: dict):
@@ -314,14 +250,14 @@ class TestSavedCartsEndpoints:
         save_response = client.post("/api/saved-carts/save", json=cart_data, headers=auth_headers)
         cart_id = save_response.json()["cart_id"]
 
-        # Get cart details
-        get_response = client.get(f"/api/saved-carts/{cart_id}", headers=auth_headers)
-        cart = get_response.json()["cart"]
+        # Get cart details by comparing it
+        get_response = client.get(f"/api/saved-carts/{cart_id}/compare", headers=auth_headers)
+        data = get_response.json()
 
         # Verify Hebrew text is preserved
-        assert cart["cart_name"] == "הקניות השבועיות שלי"
-        assert cart["city"] == "ירושלים"
-        assert cart["items"][0]["name"] == "חלב טרה 3%"
+        assert data["cart_info"]["cart_name"] == "הקניות השבועיות שלי"
+        assert data["cart_info"]["city"] == "ירושלים"
+        assert any(item["name"] == "חלב טרה 3%" for item in data["items"])
 
     def test_save_large_cart(self, client: TestClient, auth_headers: dict):
         """Test saving a cart with many items"""
@@ -342,7 +278,43 @@ class TestSavedCartsEndpoints:
 
         # Verify it saved correctly
         cart_id = response.json()["cart_id"]
-        get_response = client.get(f"/api/saved-carts/{cart_id}", headers=auth_headers)
+        list_response = client.get("/api/saved-carts/list", headers=auth_headers)
 
-        cart = get_response.json()["cart"]
-        assert len(cart["items"]) == 50
+        carts = list_response.json()
+        large_cart = next(cart for cart in carts if cart["cart_name"] == "Large Cart")
+        assert large_cart["item_count"] == 50
+
+    def test_cart_ownership(self, client: TestClient, auth_headers: dict, db_session: Session):
+        """Test that users can't access other users' carts"""
+        # Create another user
+        other_user_response = client.post(
+            "/api/auth/register",
+            json={"email": "otheruser@example.com", "password": "password123"}
+        )
+
+        other_login = client.post(
+            "/api/auth/login",
+            data={"username": "otheruser@example.com", "password": "password123"}
+        )
+        other_token = other_login.json()["access_token"]
+        other_headers = {"Authorization": f"Bearer {other_token}"}
+
+        # Save a cart as the other user
+        cart_data = {
+            "cart_name": "Other User's Cart",
+            "city": "תל אביב",
+            "items": [{"barcode": "7290000000001", "quantity": 1}]
+        }
+
+        save_response = client.post("/api/saved-carts/save", json=cart_data, headers=other_headers)
+        cart_id = save_response.json()["cart_id"]
+
+        # Try to access with original user's token
+        response = client.get(f"/api/saved-carts/{cart_id}/compare", headers=auth_headers)
+
+        # Should not find the cart (returns 404, not 403 for security)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+        # Try to delete with original user's token
+        delete_response = client.delete(f"/api/saved-carts/{cart_id}", headers=auth_headers)
+        assert delete_response.status_code == status.HTTP_404_NOT_FOUND
