@@ -1,5 +1,5 @@
 """
-Simplified test configuration that properly handles database setup.
+Test configuration that ensures database tables are created properly.
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -13,61 +13,70 @@ os.environ["TESTING"] = "true"
 os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["USE_ORACLE"] = "false"
 
-# Create test database
+# Create test database engine
 TEST_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(
+test_engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False}
 )
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
-# Monkey patch the database module BEFORE importing anything else
+# CRITICAL: Patch database module BEFORE importing anything else
 import database.connection
+database.connection.engine = test_engine
 database.connection.SessionLocal = TestingSessionLocal
-database.connection.engine = engine
 
-# Force override the database URL
+# Force the test database URL
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
-# NOW we can safely import everything else
+# Import models and create tables BEFORE importing app
 from database.new_models import Base, Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
+
+# Create all tables in the test database
+Base.metadata.create_all(bind=test_engine)
+
+# NOW import the app (it will use our patched database)
 from main import app
+from database.connection import get_db_session
+
+
+@pytest.fixture(scope="session")
+def setup_database():
+    """Create tables once for all tests"""
+    # Tables already created above
+    yield
+    # Cleanup after all tests
+    Base.metadata.drop_all(bind=test_engine)
 
 
 @pytest.fixture(scope="function")
-def db():
-    """Create a fresh database for each test"""
-    # Create tables
-    Base.metadata.create_all(bind=engine)
+def db(setup_database):
+    """Get a database session and clean up data after each test"""
+    connection = test_engine.connect()
+    transaction = connection.begin()
+    session = TestingSessionLocal(bind=connection)
 
-    # Create session
-    session = TestingSessionLocal()
+    yield session
 
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
+    session.close()
+    transaction.rollback()
+    connection.close()
 
 
 @pytest.fixture
 def client(db):
     """Create test client with database override"""
-    # Override all possible database dependencies
     def override_get_db():
         try:
             yield db
         finally:
             pass
 
-    # Import all the get_db functions from different modules
-    from database.connection import get_db_session
-
-    # Override the main one
+    # Override the database dependency
     app.dependency_overrides[get_db_session] = override_get_db
 
-    # The routes use their own get_db functions that create new sessions
-    # We need to patch SessionLocal at the module level (already done above)
+    # Also ensure any direct SessionLocal() calls use our test db
+    # This is handled by the monkey patching above
 
     with TestClient(app) as test_client:
         yield test_client
@@ -77,7 +86,7 @@ def client(db):
 
 @pytest.fixture
 def sample_data(db):
-    """Create test data"""
+    """Create test data for each test"""
     # Create chains
     shufersal = Chain(name="shufersal", display_name="שופרסל")
     victory = Chain(name="victory", display_name="ויקטורי")
@@ -167,11 +176,21 @@ def sample_data(db):
 @pytest.fixture
 def auth_headers(client, db):
     """Create a test user and return auth headers"""
-    # Register user
+    # First, ensure we have a clean user
+    existing_user = db.query(User).filter_by(email="test@example.com").first()
+    if existing_user:
+        db.delete(existing_user)
+        db.commit()
+
+    # Register new user
     register_response = client.post("/api/auth/register", json={
         "email": "test@example.com",
         "password": "testpass123"
     })
+
+    if register_response.status_code != 200:
+        # If registration failed, try to understand why
+        print(f"Registration failed: {register_response.text}")
 
     # Login
     login_response = client.post("/api/auth/login", data={
@@ -183,17 +202,15 @@ def auth_headers(client, db):
         token = login_response.json()["access_token"]
         return {"Authorization": f"Bearer {token}"}
 
-    # Try without registering (user might exist)
-    login_response = client.post("/api/auth/login", data={
-        "username": "test@example.com",
-        "password": "testpass123"
-    })
-
-    if login_response.status_code == 200:
-        token = login_response.json()["access_token"]
-        return {"Authorization": f"Bearer {token}"}
-
     raise Exception(f"Failed to authenticate: {login_response.text}")
+
+
+@pytest.fixture(autouse=True)
+def reset_db_between_tests(db):
+    """Ensure clean state between tests"""
+    yield
+    # Clean up any data created during the test
+    db.rollback()
 
 
 @pytest.fixture
