@@ -109,4 +109,69 @@ MALFORMED_XML = '''<?xml version="1.0" encoding="UTF-8"?>
     <Store>
         <StoreId>001</StoreId>
         <StoreName>Test Store
-        <!-- Missing closing tags -->
+</root>'''
+
+
+# Price XML with missing fields
+PRICE_WITH_MISSING_FIELDS_XML = '''<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <Items>
+        <Item>
+            <ItemCode>7290000000001</ItemCode>
+            <ItemName>Product without price</ItemName>
+        </Item>
+        <Item>
+            <ItemPrice>9.99</ItemPrice>
+            <ItemName>Product without barcode</ItemName>
+        </Item>
+        <Item>
+            <ItemCode>7290000000003</ItemCode>
+            <ItemPrice>5.50</ItemPrice>
+        </Item>
+    </Items>
+</root>'''
+
+
+def get_gzipped_xml(xml_content: str) -> bytes:
+    """Helper function to create gzipped XML content for testing"""
+    buffer = BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode='wb') as gz_file:
+        gz_file.write(xml_content.encode('utf-8'))
+    return buffer.getvalue()
+
+
+# Sample file paths for testing
+SAMPLE_FILE_PATHS = {
+    'shufersal_stores': 'stores_shufersal_001.xml',
+    'shufersal_prices': 'prices_shufersal_001_20250115.xml',
+    'victory_stores': 'stores_victory.xml',
+    'victory_prices': 'prices_victory_001_20250115.xml'
+}
+
+
+# Mock XML response for web scraping tests
+MOCK_SHUFERSAL_WEBSITE_RESPONSE = '''
+<html>
+<body>
+    <div class="store-list">
+        <a href="/stores_shufersal_001.xml">stores_shufersal_001.xml</a>
+        <a href="/prices_shufersal_001_20250115.xml">prices_shufersal_001_20250115.xml</a>
+    </div>
+</body>
+</html>
+'''
+
+
+# Export all test data
+__all__ = [
+    'SHUFERSAL_STORES_XML',
+    'SHUFERSAL_PRICES_XML',
+    'VICTORY_STORES_XML',
+    'VICTORY_PRICES_XML',
+    'EMPTY_STORES_XML',
+    'MALFORMED_XML',
+    'PRICE_WITH_MISSING_FIELDS_XML',
+    'get_gzipped_xml',
+    'SAMPLE_FILE_PATHS',
+    'MOCK_SHUFERSAL_WEBSITE_RESPONSE'
+]
