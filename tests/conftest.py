@@ -1,75 +1,67 @@
 """
-Test configuration that prevents database initialization conflicts.
+Fixed test configuration that prevents database initialization conflicts.
+Uses in-memory SQLite to avoid locking issues.
 """
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, scoped_session
 import os
 from datetime import datetime
+import tempfile
+from contextlib import contextmanager
 
 # Set test environment BEFORE any imports
 os.environ["TESTING"] = "true"
 os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["USE_ORACLE"] = "false"
 
-# Create a single test database that persists for all tests
-TEST_DATABASE_URL = "sqlite:///./test.db"  # Use file-based SQLite for persistence
+# Use in-memory SQLite to avoid locking issues
+TEST_DATABASE_URL = "sqlite:///:memory:"
+
+# Create engine with proper settings for SQLite
 test_engine = create_engine(
     TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False},
+    poolclass=None,  # Disable pooling for in-memory database
+    echo=False
 )
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+# Use scoped session to handle thread safety
+TestingSessionLocal = scoped_session(
+    sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+)
 
 # Patch database.connection BEFORE any other imports
 import database.connection
 database.connection.engine = test_engine
 database.connection.SessionLocal = TestingSessionLocal
 
-# Import models
+# Import models after patching
 from database.new_models import Base, Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
-
-# Create all tables once
-Base.metadata.drop_all(bind=test_engine)  # Clean slate
-Base.metadata.create_all(bind=test_engine)
-print(f"Created tables: {list(Base.metadata.tables.keys())}")
 
 # Import app after database is set up
 from main import app
 from database.connection import get_db_session
 
 
-@pytest.fixture(scope="session")
-def setup_database():
-    """Set up database once for all tests"""
-    yield
-    # Cleanup after all tests
-    Base.metadata.drop_all(bind=test_engine)
-    if os.path.exists("test.db"):
-        os.remove("test.db")
-
-
 @pytest.fixture(scope="function")
-def db(setup_database):
-    """Create a database session for each test"""
-    connection = test_engine.connect()
-    transaction = connection.begin()
-    session = TestingSessionLocal(bind=connection)
+def db():
+    """Create a fresh database for each test"""
+    # Create all tables
+    Base.metadata.create_all(bind=test_engine)
 
-    # Clean all data before each test
-    session.query(BranchPrice).delete()
-    session.query(ChainProduct).delete()
-    session.query(Branch).delete()
-    session.query(Chain).delete()
-    session.query(SavedCart).delete()
-    session.query(User).delete()
-    session.commit()
+    # Create a session
+    session = TestingSessionLocal()
 
     yield session
 
+    # Cleanup
     session.close()
-    transaction.rollback()
-    connection.close()
+    TestingSessionLocal.remove()
+
+    # Drop all tables to ensure clean state
+    Base.metadata.drop_all(bind=test_engine)
 
 
 @pytest.fixture
@@ -81,125 +73,186 @@ def client(db):
         finally:
             pass
 
-    # Override all database dependencies
+    # Override database dependency
     app.dependency_overrides[get_db_session] = override_get_db
 
-    # Also override the SessionLocal that routes might use directly
-    original_session_local = database.connection.SessionLocal
-    database.connection.SessionLocal = lambda: db
+    # Also patch the get_db function if it exists
+    if hasattr(database.connection, 'get_db'):
+        @contextmanager
+        def override_get_db_context():
+            try:
+                yield db
+            finally:
+                pass
+        database.connection.get_db = override_get_db_context
 
     with TestClient(app) as test_client:
         yield test_client
 
-    # Restore original
-    database.connection.SessionLocal = original_session_local
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def sample_data(db):
-    """Create test data"""
-    # Create chains
-    shufersal = Chain(name="shufersal", display_name="שופרסל")
-    victory = Chain(name="victory", display_name="ויקטורי")
-    db.add_all([shufersal, victory])
-    db.flush()
+    """Create comprehensive test data"""
+    try:
+        # Create chains
+        shufersal = Chain(name="shufersal", display_name="שופרסל")
+        victory = Chain(name="victory", display_name="ויקטורי")
+        db.add_all([shufersal, victory])
+        db.commit()
 
-    # Create branches
-    branch_shufersal = Branch(
-        chain_id=shufersal.chain_id,
-        store_id="001",
-        name="שופרסל דיזנגוף",
-        address="דיזנגוף 50",
-        city="תל אביב"
-    )
-    branch_victory = Branch(
-        chain_id=victory.chain_id,
-        store_id="001",
-        name="ויקטורי סנטר",
-        address="דיזנגוף סנטר",
-        city="תל אביב"
-    )
-    db.add_all([branch_shufersal, branch_victory])
-    db.flush()
+        # Refresh to get IDs
+        db.refresh(shufersal)
+        db.refresh(victory)
 
-    # Create products
-    products = [
-        ChainProduct(
+        # Create branches with exact city names
+        branch_shufersal = Branch(
             chain_id=shufersal.chain_id,
-            barcode="7290000000001",
-            name="חלב 3% תנובה"
-        ),
-        ChainProduct(
-            chain_id=victory.chain_id,
-            barcode="7290000000001",
-            name="חלב 3% תנובה"
-        ),
-        ChainProduct(
-            chain_id=shufersal.chain_id,
-            barcode="7290000000002",
-            name="לחם אחיד"
-        ),
-        ChainProduct(
-            chain_id=victory.chain_id,
-            barcode="7290000000002",
-            name="לחם אחיד"
+            store_id="001",
+            name="שופרסל דיזנגוף",
+            address="דיזנגוף 50",
+            city="תל אביב"  # Exact city name
         )
-    ]
-    db.add_all(products)
-    db.flush()
-
-    # Create prices
-    current_time = datetime.utcnow()
-    prices = [
-        BranchPrice(
-            branch_id=branch_shufersal.branch_id,
-            chain_product_id=products[0].chain_product_id,
-            price=7.90,
-            last_updated=current_time
-        ),
-        BranchPrice(
-            branch_id=branch_victory.branch_id,
-            chain_product_id=products[1].chain_product_id,
-            price=8.50,
-            last_updated=current_time
-        ),
-        BranchPrice(
-            branch_id=branch_shufersal.branch_id,
-            chain_product_id=products[2].chain_product_id,
-            price=5.90,
-            last_updated=current_time
-        ),
-        BranchPrice(
-            branch_id=branch_victory.branch_id,
-            chain_product_id=products[3].chain_product_id,
-            price=5.50,
-            last_updated=current_time
+        branch_victory = Branch(
+            chain_id=victory.chain_id,
+            store_id="001",
+            name="ויקטורי סנטר",
+            address="דיזנגוף סנטר",
+            city="תל אביב"  # Exact city name
         )
-    ]
-    db.add_all(prices)
-    db.commit()
+        db.add_all([branch_shufersal, branch_victory])
+        db.commit()
 
-    return {
-        "chains": [shufersal, victory],
-        "branches": [branch_shufersal, branch_victory],
-        "products": products,
-        "prices": prices
-    }
+        # Refresh to get IDs
+        db.refresh(branch_shufersal)
+        db.refresh(branch_victory)
+
+        # Create products with searchable names
+        products = [
+            ChainProduct(
+                chain_id=shufersal.chain_id,
+                barcode="7290000000001",
+                name="חלב 3% תנובה",
+                product_id=None
+            ),
+            ChainProduct(
+                chain_id=victory.chain_id,
+                barcode="7290000000001",
+                name="חלב 3% תנובה",
+                product_id=None
+            ),
+            ChainProduct(
+                chain_id=shufersal.chain_id,
+                barcode="7290000000002",
+                name="לחם אחיד",
+                product_id=None
+            ),
+            ChainProduct(
+                chain_id=victory.chain_id,
+                barcode="7290000000002",
+                name="לחם אחיד",
+                product_id=None
+            )
+        ]
+        db.add_all(products)
+        db.commit()
+
+        # Refresh products
+        for product in products:
+            db.refresh(product)
+
+        # Create prices
+        current_time = datetime.utcnow()
+        prices = [
+            BranchPrice(
+                branch_id=branch_shufersal.branch_id,
+                chain_product_id=products[0].chain_product_id,
+                price=7.90,
+                last_updated=current_time
+            ),
+            BranchPrice(
+                branch_id=branch_victory.branch_id,
+                chain_product_id=products[1].chain_product_id,
+                price=8.50,
+                last_updated=current_time
+            ),
+            BranchPrice(
+                branch_id=branch_shufersal.branch_id,
+                chain_product_id=products[2].chain_product_id,
+                price=5.90,
+                last_updated=current_time
+            ),
+            BranchPrice(
+                branch_id=branch_victory.branch_id,
+                chain_product_id=products[3].chain_product_id,
+                price=5.50,
+                last_updated=current_time
+            )
+        ]
+        db.add_all(prices)
+        db.commit()
+
+        return {
+            "chains": [shufersal, victory],
+            "branches": [branch_shufersal, branch_victory],
+            "products": products,
+            "prices": prices
+        }
+    except Exception as e:
+        db.rollback()
+        raise e
 
 
 @pytest.fixture
 def auth_headers(client, db):
     """Create a test user and return auth headers"""
+    # Clear any existing test user
+    existing_user = db.query(User).filter_by(email="test@example.com").first()
+    if existing_user:
+        db.delete(existing_user)
+        db.commit()
+
     # Register user
     register_response = client.post("/api/auth/register", json={
         "email": "test@example.com",
         "password": "testpass123"
     })
 
+    if register_response.status_code != 200:
+        raise Exception(f"Failed to register: {register_response.text}")
+
     # Login to get token
     login_response = client.post("/api/auth/login", data={
         "username": "test@example.com",
+        "password": "testpass123"
+    })
+
+    if login_response.status_code == 200:
+        token = login_response.json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    raise Exception(f"Failed to authenticate: {login_response.text}")
+
+
+@pytest.fixture
+def auth_headers_fixed(client, db):
+    """Create auth headers with proper session handling"""
+    # Register a unique user for this test
+    import uuid
+    unique_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+
+    register_response = client.post("/api/auth/register", json={
+        "email": unique_email,
+        "password": "testpass123"
+    })
+
+    if register_response.status_code != 200:
+        raise Exception(f"Failed to register: {register_response.text}")
+
+    # Login to get token
+    login_response = client.post("/api/auth/login", data={
+        "username": unique_email,
         "password": "testpass123"
     })
 
@@ -220,3 +273,11 @@ def sample_cart():
             {"barcode": "7290000000002", "quantity": 1}
         ]
     }
+
+
+# Add session cleanup
+@pytest.fixture(autouse=True)
+def cleanup_sessions():
+    """Ensure sessions are cleaned up after each test"""
+    yield
+    TestingSessionLocal.remove()
