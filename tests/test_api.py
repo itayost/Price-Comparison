@@ -185,15 +185,11 @@ class TestUserFeatures:
     def test_get_saved_carts(self, client, sample_data, auth_headers):
         """Test getting user's saved carts"""
         # Save a cart first
-        save_response = client.post("/api/saved-carts/save", json={
+        client.post("/api/saved-carts/save", json={
             "cart_name": "Test Cart",
             "city": "תל אביב",
             "items": []
         }, headers=auth_headers)
-
-        # Check if save was successful
-        if save_response.status_code != 200:
-            pytest.skip(f"Cart save failed: {save_response.text}")
 
         # Get list
         response = client.get("/api/saved-carts/list", headers=auth_headers)
