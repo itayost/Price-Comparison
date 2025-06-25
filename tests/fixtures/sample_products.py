@@ -1,291 +1,195 @@
-"""
-Sample product data for tests.
+# tests/fixtures/sample_products.py
 
-This module provides test data for products, carts, and prices.
-"""
-
-from typing import List, Dict, Any
+from typing import Dict, Any, List
+from sqlalchemy.orm import Session
+from database.new_models import Chain, Branch, Product, ChainProduct, BranchPrice
 from datetime import datetime
-
 
 # Sample cart items for testing
 SAMPLE_CART_ITEMS = [
-    {
-        "barcode": "7290000000001",
-        "quantity": 2,
-        "name": "חלב טרה 3%"
-    },
-    {
-        "barcode": "7290000000002",
-        "quantity": 1,
-        "name": "לחם אחיד פרוס"
-    },
-    {
-        "barcode": "7290000000003",
-        "quantity": 1,
-        "name": "ביצים L"
-    }
+    {"barcode": "7290000000001", "quantity": 2, "name": "חלב טרה 3%"},
+    {"barcode": "7290000000002", "quantity": 1, "name": "לחם אחיד"},
+    {"barcode": "7290000000003", "quantity": 3, "name": "ביצים L"},
+    {"barcode": "7290000000004", "quantity": 1, "name": "גבינה צהובה"},
+    {"barcode": "7290000000005", "quantity": 2, "name": "עגבניות"}
 ]
 
 
-def create_test_database_data(db_session):
-    """Create comprehensive test data in the database"""
-    from database.new_models import Chain, Branch, Product, ChainProduct, BranchPrice
+def create_test_database_data(db_session: Session) -> Dict[str, Any]:
+    """Create comprehensive test data for database"""
+
+    # Clear existing data
+    db_session.query(BranchPrice).delete()
+    db_session.query(ChainProduct).delete()
+    db_session.query(Product).delete()
+    db_session.query(Branch).delete()
+    db_session.query(Chain).delete()
+    db_session.commit()
 
     # Create chains
-    shufersal = Chain(name='shufersal', display_name='שופרסל')
-    victory = Chain(name='victory', display_name='ויקטורי')
+    chains = {}
+    chain_data = [
+        ('shufersal', 'שופרסל'),
+        ('victory', 'ויקטורי'),
+        ('yochananof', 'יוחננוף'),
+        ('rami_levy', 'רמי לוי')
+    ]
 
-    db_session.add_all([shufersal, victory])
+    for name, display_name in chain_data:
+        chain = Chain(name=name, display_name=display_name)
+        db_session.add(chain)
+        chains[name] = chain
+
     db_session.commit()
 
     # Create branches
-    branches = [
+    branches = {}
+    branch_data = [
         # Shufersal branches
-        Branch(
-            chain_id=shufersal.chain_id,
-            store_id='001',
-            name='שופרסל דיזנגוף',
-            address='דיזנגוף 50',
-            city='תל אביב'
-        ),
-        Branch(
-            chain_id=shufersal.chain_id,
-            store_id='002',
-            name='שופרסל רמת אביב',
-            address='איינשטיין 40',
-            city='תל אביב'
-        ),
-        Branch(
-            chain_id=shufersal.chain_id,
-            store_id='010',
-            name='שופרסל חיפה',
-            address='חורב 15',
-            city='חיפה'
-        ),
+        ('shufersal_dizengoff', chains['shufersal'].chain_id, '001', 'שופרסל דיזנגוף', 'תל אביב', 'דיזנגוף 50'),
+        ('shufersal_ramat_gan', chains['shufersal'].chain_id, '002', 'שופרסל רמת גן', 'רמת גן', 'ביאליק 136'),
+        ('shufersal_haifa', chains['shufersal'].chain_id, '003', 'שופרסל חיפה', 'חיפה', 'הרצל 15'),
+
         # Victory branches
-        Branch(
-            chain_id=victory.chain_id,
-            store_id='001',
-            name='ויקטורי דיזנגוף סנטר',
-            address='דיזנגוף סנטר',
-            city='תל אביב'
-        ),
-        Branch(
-            chain_id=victory.chain_id,
-            store_id='002',
-            name='ויקטורי רמת החייל',
-            address='הברזל 15',
-            city='תל אביב'
-        ),
-        Branch(
-            chain_id=victory.chain_id,
-            store_id='005',
-            name='ויקטורי גרנד קניון',
-            address='גרנד קניון',
-            city='חיפה'
-        )
+        ('victory_tlv', chains['victory'].chain_id, '101', 'ויקטורי תל אביב', 'תל אביב', 'אלנבי 100'),
+        ('victory_ramat_gan', chains['victory'].chain_id, '102', 'ויקטורי רמת גן', 'רמת גן', 'ז\'בוטינסקי 55'),
+        ('victory_haifa', chains['victory'].chain_id, '103', 'ויקטורי חיפה', 'חיפה', 'בן גוריון 50'),
+
+        # Yochananof branches
+        ('yochananof_tlv', chains['yochananof'].chain_id, '201', 'יוחננוף תל אביב', 'תל אביב', 'נמיר 200'),
+        ('yochananof_ramat_gan', chains['yochananof'].chain_id, '202', 'יוחננוף רמת גן', 'רמת גן', 'אבא הלל 100'),
+
+        # Rami Levy branches
+        ('rami_levy_tlv', chains['rami_levy'].chain_id, '301', 'רמי לוי תל אביב', 'תל אביב', 'לה גוארדיה 50'),
+        ('rami_levy_ramat_gan', chains['rami_levy'].chain_id, '302', 'רמי לוי רמת גן', 'רמת גן', 'המעגל 10')
     ]
 
-    db_session.add_all(branches)
+    for key, chain_id, branch_id, name, city, address in branch_data:
+        branch = Branch(
+            chain_id=chain_id,
+            branch_id=branch_id,
+            name=name,
+            city=city,
+            address=address
+        )
+        db_session.add(branch)
+        branches[key] = branch
+
     db_session.commit()
 
-    # Create products for each chain
-    products_data = [
-        # Common products available in both chains
-        ('7290000000001', 'חלב טרה 3%', 'dairy'),
-        ('7290000000002', 'לחם אחיד פרוס', 'bakery'),
-        ('7290000000003', 'ביצים L 12 יח', 'dairy'),
-        ('7290000000004', 'עגבניות', 'produce'),
-        ('7290000000005', 'מים מינרלים 1.5 ליטר', 'beverages'),
-        # Additional products
-        ('7290000000010', 'גבינה צהובה 200 גרם', 'dairy'),
-        ('7290000000011', 'קוטג 5%', 'dairy'),
-        ('7290000000012', 'יוגורט דנונה', 'dairy'),
-        ('7290000000013', 'קורנפלקס', 'cereals'),
-        ('7290000000014', 'אורז בסמטי', 'grains'),
-        ('7290000000015', 'פסטה ברילה', 'grains'),
-        ('7290000000016', 'שמן זית', 'oils'),
-        ('7290000000017', 'סוכר לבן', 'baking'),
-        ('7290000000018', 'קמח', 'baking'),
-        ('7290000000019', 'ביצים M 12 יח', 'dairy'),
-        ('7290000000020', 'חלב תנובה 3%', 'dairy'),
+    # Create products
+    products = {}
+    product_data = [
+        ('7290000000001', 'חלב טרה 3%', 'טרה'),
+        ('7290000000002', 'לחם אחיד', 'ברמן'),
+        ('7290000000003', 'ביצים L', 'תנובה'),
+        ('7290000000004', 'גבינה צהובה', 'תנובה'),
+        ('7290000000005', 'עגבניות', 'שדות'),
+        ('7290000000006', 'מלפפונים', 'שדות'),
+        ('7290000000007', 'במבה', 'אסם'),
+        ('7290000000008', 'ביסלי', 'אסם'),
+        ('7290000000009', 'קולה 1.5 ליטר', 'קוקה קולה'),
+        ('7290000000010', 'מים מינרלים', 'נביעות')
     ]
 
-    # Create products for both chains
-    chain_products = []
-    for chain in [shufersal, victory]:
-        for barcode, name, category in products_data:
-            # Slightly modify names for different chains
-            product_name = name
-            if chain.name == 'victory' and 'טרה' in name:
-                product_name = name.replace('טרה', 'תנובה')
+    # Create base products
+    base_products = {}
+    for barcode, name, manufacturer in product_data:
+        product = Product(
+            barcode=barcode,
+            name=name,
+            manufacturer=manufacturer
+        )
+        db_session.add(product)
+        base_products[barcode] = product
 
+    db_session.commit()
+
+    # Create chain products (products per chain)
+    for chain_name, chain in chains.items():
+        for barcode, name, manufacturer in product_data:
+            # Vary product names slightly per chain
+            if chain_name == 'victory' and 'טרה' in name:
+                name = name.replace('טרה', 'תנובה')
+            elif chain_name == 'rami_levy' and 'תנובה' in name:
+                name = name.replace('תנובה', 'שטראוס')
+
+            key = f"{chain_name}_{barcode}"
             chain_product = ChainProduct(
                 chain_id=chain.chain_id,
                 barcode=barcode,
-                name=product_name
+                name=name
             )
-            chain_products.append(chain_product)
+            db_session.add(chain_product)
+            products[key] = chain_product
 
-    db_session.add_all(chain_products)
     db_session.commit()
 
-    # Create prices for products in branches
-    prices = []
+    # Create prices
+    prices = {}
 
-    # Price mapping: (branch_store_id, barcode, price)
-    price_data = {
-        'shufersal': {
-            '001': [  # Dizengoff branch
-                ('7290000000001', 5.90),   # Milk
-                ('7290000000002', 7.50),   # Bread
-                ('7290000000003', 14.90),  # Eggs
-                ('7290000000004', 6.90),   # Tomatoes
-                ('7290000000005', 2.50),   # Water
-                ('7290000000010', 24.90),  # Yellow cheese
-                ('7290000000011', 4.50),   # Cottage cheese
-                ('7290000000012', 3.90),   # Yogurt
-            ],
-            '002': [  # Ramat Aviv branch - slightly different prices
-                ('7290000000001', 6.20),
-                ('7290000000002', 7.90),
-                ('7290000000003', 15.50),
-                ('7290000000004', 7.50),
-                ('7290000000005', 2.90),
-                ('7290000000010', 25.90),
-                ('7290000000011', 4.90),
-            ],
-            '010': [  # Haifa branch
-                ('7290000000001', 5.50),
-                ('7290000000002', 6.90),
-                ('7290000000003', 13.90),
-                ('7290000000004', 5.90),
-                ('7290000000005', 2.20),
-            ]
-        },
-        'victory': {
-            '001': [  # Dizengoff Center
-                ('7290000000001', 5.50),   # Milk - cheaper
-                ('7290000000002', 8.90),   # Bread - more expensive
-                ('7290000000003', 13.90),  # Eggs - cheaper
-                ('7290000000004', 5.90),   # Tomatoes - cheaper
-                ('7290000000005', 2.20),   # Water
-                ('7290000000010', 22.90),  # Yellow cheese
-                ('7290000000011', 4.20),   # Cottage cheese
-                ('7290000000012', 3.50),   # Yogurt
-            ],
-            '002': [  # Ramat HaHayal
-                ('7290000000001', 5.70),
-                ('7290000000002', 8.50),
-                ('7290000000003', 14.50),
-                ('7290000000004', 6.50),
-                ('7290000000005', 2.40),
-            ],
-            '005': [  # Haifa Grand Canyon
-                ('7290000000001', 5.20),
-                ('7290000000002', 7.90),
-                ('7290000000003', 12.90),
-                ('7290000000004', 5.50),
-                ('7290000000005', 2.00),
-            ]
-        }
+    # Price variations by chain (multipliers)
+    chain_price_multipliers = {
+        'shufersal': 1.0,
+        'victory': 0.95,
+        'yochananof': 1.05,
+        'rami_levy': 0.90
     }
 
-    # Create price entries
-    for chain_name, chain_prices in price_data.items():
-        chain = shufersal if chain_name == 'shufersal' else victory
+    # Base prices
+    base_prices = {
+        '7290000000001': 5.90,  # חלב
+        '7290000000002': 7.50,  # לחם
+        '7290000000003': 14.90, # ביצים
+        '7290000000004': 22.90, # גבינה
+        '7290000000005': 3.90,  # עגבניות
+        '7290000000006': 4.90,  # מלפפונים
+        '7290000000007': 6.90,  # במבה
+        '7290000000008': 7.90,  # ביסלי
+        '7290000000009': 8.90,  # קולה
+        '7290000000010': 3.50   # מים
+    }
 
-        for store_id, product_prices in chain_prices.items():
-            # Find branch
-            branch = next(b for b in branches if b.chain_id == chain.chain_id and b.store_id == store_id)
+    # Create prices for each product in each branch
+    for branch_key, branch in branches.items():
+        chain_name = branch_key.split('_')[0]
 
-            for barcode, price in product_prices:
-                # Find chain product
-                chain_product = next(
-                    cp for cp in chain_products
-                    if cp.chain_id == chain.chain_id and cp.barcode == barcode
-                )
+        # Not all products available in all branches
+        available_products = list(product_data)
+        if 'haifa' in branch_key:
+            # Haifa branches have fewer products
+            available_products = available_products[:7]
 
-                price_entry = BranchPrice(
-                    chain_product_id=chain_product.chain_product_id,
+        for barcode, _, _ in available_products:
+            product_key = f"{chain_name}_{barcode}"
+            if product_key in products:
+                base_price = base_prices[barcode]
+                multiplier = chain_price_multipliers[chain_name]
+
+                # Add some city-based variation
+                if 'tlv' in branch_key:
+                    multiplier *= 1.05  # Tel Aviv is more expensive
+                elif 'haifa' in branch_key:
+                    multiplier *= 0.98  # Haifa is slightly cheaper
+
+                price_value = round(base_price * multiplier, 2)
+
+                price_key = f"{branch_key}_{barcode}"
+                price = BranchPrice(
+                    chain_product_id=products[product_key].chain_product_id,
                     branch_id=branch.branch_id,
-                    price=price,
+                    price=price_value,
                     last_updated=datetime.utcnow()
                 )
-                prices.append(price_entry)
+                db_session.add(price)
+                prices[price_key] = price
 
-    db_session.add_all(prices)
     db_session.commit()
 
     return {
-        'chains': {'shufersal': shufersal, 'victory': victory},
-        'branches': branches,
-        'products': chain_products,
-        'prices': prices
+        "chains": chains,
+        "branches": branches,
+        "products": products,
+        "prices": prices,
+        "base_products": base_products
     }
-
-
-# Sample test data for specific test scenarios
-HEBREW_PRODUCT_NAMES = [
-    "חלב טרה 3%",
-    "לחם אחיד פרוס",
-    "ביצים L",
-    "עגבניות",
-    "קוטג' 5%",
-    "צ'יפס תפוצ'יפס",
-    "במבה אסם",
-    "שוקולד עלית"
-]
-
-
-HEBREW_CITIES = [
-    "תל אביב",
-    "ירושלים",
-    "חיפה",
-    "באר שבע",
-    "רמת גן",
-    "פתח תקווה",
-    "ראשון לציון",
-    "אשדוד"
-]
-
-
-SAMPLE_BARCODES = [
-    "7290000000001",
-    "7290000000002",
-    "7290000000003",
-    "7290000000004",
-    "7290000000005",
-    "7290000000010",
-    "7290000000011",
-    "7290000000012",
-    "7290000000013",
-    "7290000000014",
-    "7290000000015",
-    "7290000000016",
-    "7290000000017",
-    "7290000000018",
-    "7290000000019",
-    "7290000000020"
-]
-
-
-def get_sample_cart_for_city(city: str) -> Dict[str, Any]:
-    """Get a sample cart appropriate for testing in a specific city"""
-    return {
-        "city": city,
-        "items": SAMPLE_CART_ITEMS[:3]  # First 3 items
-    }
-
-
-def get_large_sample_cart() -> List[Dict[str, Any]]:
-    """Get a large cart for performance testing"""
-    return [
-        {
-            "barcode": barcode,
-            "quantity": (i % 5) + 1,
-            "name": f"Product {i}"
-        }
-        for i, barcode in enumerate(SAMPLE_BARCODES)
-    ]

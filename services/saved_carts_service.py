@@ -150,5 +150,38 @@ class SavedCartsService:
             }
         }
 
-    # ... rest of the methods remain the same but use self._parse_items() when reading
-    # and json.dumps() when writing
+    def delete_cart(self, user_id: int, cart_id: int) -> bool:
+        """Delete a saved cart"""
+        cart = self.get_cart_by_id(user_id, cart_id)
+        if not cart:
+            return False
+
+        self.db.delete(cart)
+        self.db.commit()
+        logger.info(f"Deleted cart {cart_id} for user {user_id}")
+        return True
+
+    def update_cart_items(self, user_id: int, cart_id: int,
+                          items: List[CartItem]) -> Optional[SavedCart]:
+        """Update items in an existing cart"""
+        cart = self.get_cart_by_id(user_id, cart_id)
+        if not cart:
+            return None
+
+        # Prepare items data for JSON storage
+        items_data = [
+            {
+                'barcode': item.barcode,
+                'quantity': item.quantity,
+                'name': item.name
+            }
+            for item in items
+        ]
+
+        # Update cart
+        cart.items = json.dumps(items_data, ensure_ascii=False)
+        cart.updated_at = datetime.utcnow()
+
+        self.db.commit()
+        logger.info(f"Updated items in cart {cart_id} for user {user_id}")
+        return cart

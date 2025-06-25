@@ -38,7 +38,6 @@ from services.auth_service import AuthService
 from services.cart_service import CartComparisonService, CartItem
 from services.product_search_service import ProductSearchService
 from main import app
-from tests.fixtures.sample_products import SAMPLE_CART_ITEMS, create_test_database_data
 
 # =====================================================
 # Database Setup
@@ -62,13 +61,19 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 # Core Fixtures
 # =====================================================
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def setup_test_database():
-    """Create database tables once per test session"""
+    """Create database tables for each test function"""
+    # Import all models to ensure they're registered with Base
+    from database.new_models import (
+        Chain, Branch, Product, ChainProduct, BranchPrice,
+        User, SavedCart
+    )
+
     # Create all tables
     Base.metadata.create_all(bind=engine)
     yield
-    # Drop all tables after tests
+    # Drop all tables after test
     Base.metadata.drop_all(bind=engine)
 
 
@@ -160,98 +165,89 @@ def auth_headers(client: TestClient, test_user: User) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture
-def admin_user(db_session: Session) -> User:
-    """Create an admin user (if your app has admin functionality)"""
-    auth_service = AuthService(db_session)
-
-    # Check if already exists
-    existing = auth_service.get_user_by_email("admin@example.com")
-    if existing:
-        return existing
-
-    user = auth_service.create_user(
-        email="admin@example.com",
-        password="adminpass123"
-    )
-    # Set admin flag if your User model has one
-    # user.is_admin = True
-    db_session.commit()
-    return user
-
-
 # =====================================================
 # Test Data Fixtures
 # =====================================================
 
 @pytest.fixture
 def test_chains(db_session: Session) -> Dict[str, Chain]:
-    """Create test supermarket chains"""
-    chains = {
-        'shufersal': Chain(name='shufersal', display_name='שופרסל'),
-        'victory': Chain(name='victory', display_name='ויקטורי')
-    }
-
-    for chain in chains.values():
-        db_session.add(chain)
+    """Create test chains with proper cleanup"""
+    # Clear existing chains first
+    db_session.query(Chain).delete()
     db_session.commit()
 
+    chains = {}
+    chain_data = [
+        ('shufersal', 'שופרסל'),
+        ('victory', 'ויקטורי'),
+        ('yochananof', 'יוחננוף')
+    ]
+
+    for name, display_name in chain_data:
+        chain = Chain(name=name, display_name=display_name)
+        db_session.add(chain)
+        chains[name] = chain
+
+    db_session.commit()
     return chains
 
 
 @pytest.fixture
 def test_branches(db_session: Session, test_chains: Dict[str, Chain]) -> Dict[str, Branch]:
     """Create test branches in different cities"""
-    branches = {
-        'shufersal_dizengoff': Branch(
-            chain_id=test_chains['shufersal'].chain_id,
-            store_id='001',
-            name='שופרסל דיזנגוף',
-            address='דיזנגוף 50',
-            city='תל אביב'
-        ),
-        'shufersal_haifa': Branch(
-            chain_id=test_chains['shufersal'].chain_id,
-            store_id='010',
-            name='שופרסל חיפה',
-            address='חורב 15',
-            city='חיפה'
-        ),
-        'victory_tlv': Branch(
-            chain_id=test_chains['victory'].chain_id,
-            store_id='001',
-            name='ויקטורי דיזנגוף סנטר',
-            address='דיזנגוף סנטר',
-            city='תל אביב'
-        ),
-        'victory_haifa': Branch(
-            chain_id=test_chains['victory'].chain_id,
-            store_id='005',
-            name='ויקטורי גרנד קניון',
-            address='גרנד קניון',
-            city='חיפה'
-        )
-    }
+    branches = {}
+
+    # Shufersal branches
+    branches['shufersal_dizengoff'] = Branch(
+        chain_id=test_chains['shufersal'].chain_id,
+        branch_id="001",
+        name="שופרסל דיזנגוף",
+        city="תל אביב",
+        address="דיזנגוף 50"
+    )
+
+    branches['shufersal_haifa'] = Branch(
+        chain_id=test_chains['shufersal'].chain_id,
+        branch_id="002",
+        name="שופרסל חיפה",
+        city="חיפה",
+        address="הרצל 15"
+    )
+
+    # Victory branches
+    branches['victory_tlv'] = Branch(
+        chain_id=test_chains['victory'].chain_id,
+        branch_id="101",
+        name="ויקטורי תל אביב",
+        city="תל אביב",
+        address="אלנבי 100"
+    )
+
+    branches['victory_haifa'] = Branch(
+        chain_id=test_chains['victory'].chain_id,
+        branch_id="102",
+        name="ויקטורי חיפה",
+        city="חיפה",
+        address="בן גוריון 50"
+    )
 
     for branch in branches.values():
         db_session.add(branch)
-    db_session.commit()
 
+    db_session.commit()
     return branches
 
 
 @pytest.fixture
 def test_products(db_session: Session, test_chains: Dict[str, Chain]) -> Dict[str, ChainProduct]:
-    """Create test products for each chain"""
+    """Create test products for chains"""
     products = {}
 
-    # Common products available in both chains
+    # Product data: (barcode, name)
     product_data = [
         ('7290000000001', 'חלב טרה 3%'),
-        ('7290000000002', 'לחם אחיד פרוס'),
-        ('7290000000003', 'ביצים L 12 יח'),
-        ('7290000000004', 'עגבניות'),
-        ('7290000000005', 'מים מינרלים 1.5 ליטר')
+        ('7290000000002', 'לחם אחיד'),
+        ('7290000000003', 'ביצים L')
     ]
 
     for chain_name, chain in test_chains.items():
@@ -306,12 +302,6 @@ def test_prices(
     return prices
 
 
-@pytest.fixture
-def comprehensive_test_data(db_session: Session) -> Dict[str, Any]:
-    """Create comprehensive test data using the helper function"""
-    return create_test_database_data(db_session)
-
-
 # =====================================================
 # Utility Fixtures
 # =====================================================
@@ -319,15 +309,10 @@ def comprehensive_test_data(db_session: Session) -> Dict[str, Any]:
 @pytest.fixture
 def sample_cart_items() -> List[Dict[str, Any]]:
     """Sample cart items for comparison"""
-    return SAMPLE_CART_ITEMS
-
-
-@pytest.fixture
-def large_cart_items() -> List[Dict[str, Any]]:
-    """Large cart for performance testing"""
     return [
-        {"barcode": f"729000000000{i}", "quantity": (i % 3) + 1, "name": f"מוצר {i}"}
-        for i in range(1, 21)  # 20 items
+        {"barcode": "7290000000001", "quantity": 2, "name": "חלב טרה 3%"},
+        {"barcode": "7290000000002", "quantity": 1, "name": "לחם אחיד"},
+        {"barcode": "7290000000003", "quantity": 3, "name": "ביצים L"}
     ]
 
 
@@ -339,60 +324,6 @@ def saved_cart_data(test_user: User, sample_cart_items: List[Dict[str, Any]]) ->
         "cart_name": "הקניות השבועיות",
         "city": "תל אביב",
         "items": json.dumps(sample_cart_items, ensure_ascii=False)
-    }
-
-
-# =====================================================
-# Service Fixtures
-# =====================================================
-
-@pytest.fixture
-def auth_service(db_session: Session) -> AuthService:
-    """Create AuthService instance"""
-    return AuthService(db_session)
-
-
-@pytest.fixture
-def cart_service(db_session: Session) -> CartComparisonService:
-    """Create CartComparisonService instance"""
-    return CartComparisonService(db_session)
-
-
-@pytest.fixture
-def search_service(db_session: Session) -> ProductSearchService:
-    """Create ProductSearchService instance"""
-    return ProductSearchService(db_session)
-
-
-# =====================================================
-# Utility Fixtures
-# =====================================================
-
-@pytest.fixture
-def mock_datetime(monkeypatch):
-    """Mock datetime for consistent testing"""
-    import datetime as dt
-
-    class MockDatetime:
-        @classmethod
-        def utcnow(cls):
-            return dt.datetime(2025, 1, 15, 12, 0, 0)
-
-        @classmethod
-        def now(cls):
-            return dt.datetime(2025, 1, 15, 14, 0, 0)  # +2 hours for Israel time
-
-    monkeypatch.setattr("datetime.datetime", MockDatetime)
-
-
-@pytest.fixture
-def hebrew_text_samples() -> Dict[str, List[str]]:
-    """Sample Hebrew text for testing"""
-    return {
-        "product_names": ["חלב", "לחם", "ביצים", "גבינה", "עגבניות"],
-        "cities": ["תל אביב", "ירושלים", "חיפה", "באר שבע"],
-        "addresses": ["דיזנגוף 50", "רוטשילד 1", "הרצל 100"],
-        "special_chars": ["קוטג'", "ג'ינס", "צ'יפס"]
     }
 
 
@@ -432,18 +363,3 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.cart)
         if "hebrew" in item.name or "hebrew" in str(item.fspath):
             item.add_marker(pytest.mark.hebrew)
-
-
-# =====================================================
-# Cleanup Fixtures
-# =====================================================
-
-@pytest.fixture(autouse=True)
-def cleanup_temp_files():
-    """Cleanup any temporary files created during tests"""
-    yield
-    # Cleanup code here if needed
-    import tempfile
-    import shutil
-    temp_dir = tempfile.gettempdir()
-    # Remove any test-specific temp files if created
