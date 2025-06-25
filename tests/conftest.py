@@ -38,6 +38,7 @@ from services.auth_service import AuthService
 from services.cart_service import CartComparisonService
 from services.product_search_service import ProductSearchService
 from main import app
+from tests.fixtures.sample_products import SAMPLE_CART_ITEMS
 
 # =====================================================
 # Database Setup

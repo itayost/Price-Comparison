@@ -12,10 +12,10 @@ import json
 
 from database.new_models import (
     Chain, Branch, Product, ChainProduct, BranchPrice, 
-    User, SavedCart, ComparisonHistory
+    User, SavedCart
 )
 from services.auth_service import AuthService
-from services.cart_comparison_service import CartComparisonService
+from services.cart_service import CartComparisonService
 from tests.fixtures.sample_products import create_test_database_data
 
 
