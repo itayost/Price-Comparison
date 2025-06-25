@@ -1,5 +1,5 @@
 """
-Fixed test configuration with correct auth flow.
+Simplified test configuration that properly handles database setup.
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -8,17 +8,12 @@ from sqlalchemy.orm import sessionmaker
 import os
 from datetime import datetime
 
-# Set test environment
+# Set test environment BEFORE any imports
 os.environ["TESTING"] = "true"
 os.environ["SECRET_KEY"] = "test-secret-key"
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["USE_ORACLE"] = "false"
 
-# Import after environment is set
-from database.connection import Base, get_db_session
-from database.new_models import Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
-from main import app
-
-# Simple in-memory database for tests
+# Create test database
 TEST_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
     TEST_DATABASE_URL,
@@ -26,171 +21,159 @@ engine = create_engine(
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Monkey patch the database module BEFORE importing anything else
+import database.connection
+database.connection.SessionLocal = TestingSessionLocal
+database.connection.engine = engine
+
+# Force override the database URL
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+# NOW we can safely import everything else
+from database.new_models import Base, Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
+from main import app
+
 
 @pytest.fixture(scope="function")
 def db():
     """Create a fresh database for each test"""
-    # Create ALL tables including User and SavedCart
+    # Create tables
     Base.metadata.create_all(bind=engine)
 
     # Create session
-    db_session = TestingSessionLocal()
+    session = TestingSessionLocal()
 
     try:
-        yield db_session
+        yield session
     finally:
-        db_session.close()
-        # Drop all tables after test
+        session.close()
         Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
 def client(db):
     """Create test client with database override"""
+    # Override all possible database dependencies
     def override_get_db():
         try:
             yield db
         finally:
             pass
 
-    # Override the database dependency
+    # Import all the get_db functions from different modules
+    from database.connection import get_db_session
+
+    # Override the main one
     app.dependency_overrides[get_db_session] = override_get_db
+
+    # The routes use their own get_db functions that create new sessions
+    # We need to patch SessionLocal at the module level (already done above)
 
     with TestClient(app) as test_client:
         yield test_client
 
-    # Clear overrides
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def sample_data(db):
-    """Create minimal test data for price comparison"""
+    """Create test data"""
     # Create chains
-    shufersal = Chain(
-        chain_id=1,
-        name="shufersal",
-        display_name="שופרסל"
-    )
-    victory = Chain(
-        chain_id=2,
-        name="victory",
-        display_name="ויקטורי"
-    )
+    shufersal = Chain(name="shufersal", display_name="שופרסל")
+    victory = Chain(name="victory", display_name="ויקטורי")
     db.add_all([shufersal, victory])
-    db.commit()  # Commit chains first
+    db.flush()
 
-    # Create branches in Tel Aviv
-    branch_shufersal = Branch(
-        branch_id=1,
-        chain_id=1,
+    # Create branches
+    branch_s = Branch(
+        chain_id=shufersal.chain_id,
         store_id="001",
         name="שופרסל דיזנגוף",
         address="דיזנגוף 50",
         city="תל אביב"
     )
-    branch_victory = Branch(
-        branch_id=2,
-        chain_id=2,
+    branch_v = Branch(
+        chain_id=victory.chain_id,
         store_id="001",
         name="ויקטורי סנטר",
         address="דיזנגוף סנטר",
         city="תל אביב"
     )
-    db.add_all([branch_shufersal, branch_victory])
-    db.commit()  # Commit branches
+    db.add_all([branch_s, branch_v])
+    db.flush()
 
-    # Create sample products (milk and bread)
-    products = [
-        ChainProduct(
-            chain_product_id=1,
-            chain_id=1,
-            barcode="7290000000001",
-            name="חלב 3% תנובה"
-        ),
-        ChainProduct(
-            chain_product_id=2,
-            chain_id=2,
-            barcode="7290000000001",
-            name="חלב 3% תנובה"
-        ),
-        ChainProduct(
-            chain_product_id=3,
-            chain_id=1,
-            barcode="7290000000002",
-            name="לחם אחיד"
-        ),
-        ChainProduct(
-            chain_product_id=4,
-            chain_id=2,
-            barcode="7290000000002",
-            name="לחם אחיד"
-        )
-    ]
-    db.add_all(products)
-    db.commit()  # Commit products
+    # Create products
+    milk_s = ChainProduct(
+        chain_id=shufersal.chain_id,
+        barcode="7290000000001",
+        name="חלב 3% תנובה"
+    )
+    milk_v = ChainProduct(
+        chain_id=victory.chain_id,
+        barcode="7290000000001",
+        name="חלב 3% תנובה"
+    )
+    bread_s = ChainProduct(
+        chain_id=shufersal.chain_id,
+        barcode="7290000000002",
+        name="לחם אחיד"
+    )
+    bread_v = ChainProduct(
+        chain_id=victory.chain_id,
+        barcode="7290000000002",
+        name="לחם אחיד"
+    )
+    db.add_all([milk_s, milk_v, bread_s, bread_v])
+    db.flush()
 
-    # Create prices with timestamps
-    current_time = datetime.utcnow()
+    # Create prices
     prices = [
         BranchPrice(
-            price_id=1,
-            branch_id=1,
-            chain_product_id=1,
+            branch_id=branch_s.branch_id,
+            chain_product_id=milk_s.chain_product_id,
             price=7.90,
-            last_updated=current_time
+            last_updated=datetime.utcnow()
         ),
         BranchPrice(
-            price_id=2,
-            branch_id=2,
-            chain_product_id=2,
+            branch_id=branch_v.branch_id,
+            chain_product_id=milk_v.chain_product_id,
             price=8.50,
-            last_updated=current_time
+            last_updated=datetime.utcnow()
         ),
         BranchPrice(
-            price_id=3,
-            branch_id=1,
-            chain_product_id=3,
+            branch_id=branch_s.branch_id,
+            chain_product_id=bread_s.chain_product_id,
             price=5.90,
-            last_updated=current_time
+            last_updated=datetime.utcnow()
         ),
         BranchPrice(
-            price_id=4,
-            branch_id=2,
-            chain_product_id=4,
+            branch_id=branch_v.branch_id,
+            chain_product_id=bread_v.chain_product_id,
             price=5.50,
-            last_updated=current_time
+            last_updated=datetime.utcnow()
         )
     ]
     db.add_all(prices)
-    db.commit()  # Commit prices
-
-    # Refresh all objects to ensure relationships are loaded
-    db.refresh(shufersal)
-    db.refresh(victory)
-    db.refresh(branch_shufersal)
-    db.refresh(branch_victory)
+    db.commit()
 
     return {
         "chains": [shufersal, victory],
-        "branches": [branch_shufersal, branch_victory],
-        "products": products,
+        "branches": [branch_s, branch_v],
+        "products": [milk_s, milk_v, bread_s, bread_v],
         "prices": prices
     }
 
 
 @pytest.fixture
-def auth_headers(client):
+def auth_headers(client, db):
     """Create a test user and return auth headers"""
-    # Register user - expect 200 not 201
+    # Register user
     register_response = client.post("/api/auth/register", json={
         "email": "test@example.com",
         "password": "testpass123"
     })
 
-    # If registration failed, user might already exist, try login anyway
-
-    # Login to get token
+    # Login
     login_response = client.post("/api/auth/login", data={
         "username": "test@example.com",
         "password": "testpass123"
@@ -199,18 +182,27 @@ def auth_headers(client):
     if login_response.status_code == 200:
         token = login_response.json()["access_token"]
         return {"Authorization": f"Bearer {token}"}
-    else:
-        # If we can't login, raise an error so we know
-        raise Exception(f"Failed to authenticate test user: {login_response.text}")
+
+    # Try without registering (user might exist)
+    login_response = client.post("/api/auth/login", data={
+        "username": "test@example.com",
+        "password": "testpass123"
+    })
+
+    if login_response.status_code == 200:
+        token = login_response.json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    raise Exception(f"Failed to authenticate: {login_response.text}")
 
 
 @pytest.fixture
 def sample_cart():
-    """Return a sample cart for testing"""
+    """Sample cart for testing"""
     return {
         "city": "תל אביב",
         "items": [
-            {"barcode": "7290000000001", "quantity": 2},  # Milk
-            {"barcode": "7290000000002", "quantity": 1}   # Bread
+            {"barcode": "7290000000001", "quantity": 2},
+            {"barcode": "7290000000002", "quantity": 1}
         ]
     }

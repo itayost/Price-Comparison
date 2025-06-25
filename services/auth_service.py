@@ -97,26 +97,25 @@ class AuthService:
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
 
-    def verify_token(self, token: str) -> Optional[dict]:
-        """Verify and decode a JWT token"""
+    def verify_token(self, token: str) -> Optional[str]:
+        """Verify and decode a JWT token - returns email"""
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            return payload
+            email: str = payload.get("sub")
+            if email is None:
+                return None
+            return email
         except jwt.ExpiredSignatureError:
             logger.warning("Token expired")
             return None
-        except jwt.JWTError as e:
+        except jwt.PyJWTError as e:  # Fixed: Use PyJWTError instead of JWTError
             logger.warning(f"Invalid token: {e}")
             return None
 
     def get_current_user_from_token(self, token: str) -> Optional[User]:
         """Get user from JWT token"""
-        payload = self.verify_token(token)
-        if not payload:
-            return None
-
-        email: str = payload.get("sub")
-        if email is None:
+        email = self.verify_token(token)
+        if not email:
             return None
 
         user = self.get_user_by_email(email)

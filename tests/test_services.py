@@ -1,5 +1,5 @@
 """
-Service tests with correct data structures and method calls.
+Fixed service tests with correct data structures and method calls.
 """
 import pytest
 from datetime import datetime
@@ -153,14 +153,13 @@ class TestAuthenticationService:
         email = "tokentest@example.com"
         token = service.create_access_token({"sub": email})
 
-        # Verify token - returns the full payload, not just email
-        payload = service.verify_token(token)
-        assert payload is not None
-        assert payload.get("sub") == email
+        # Verify token - returns the email string
+        verified_email = service.verify_token(token)
+        assert verified_email == email
 
         # Test invalid token
-        invalid_payload = service.verify_token("invalid.token.here")
-        assert invalid_payload is None
+        invalid_email = service.verify_token("invalid.token.here")
+        assert invalid_email is None
 
     def test_duplicate_user_creation(self, db):
         """Test that duplicate users cannot be created"""
