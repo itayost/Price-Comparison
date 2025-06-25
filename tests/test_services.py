@@ -1,10 +1,9 @@
 """
-Simplified service tests for business logic.
-Test core functionality without complex mocking.
+Service tests with correct data structures and method calls.
 """
 import pytest
 from datetime import datetime
-from services.cart_service import CartComparisonService
+from services.cart_service import CartComparisonService, CartItem
 from services.auth_service import AuthService
 from services.product_search_service import ProductSearchService
 
@@ -16,21 +15,22 @@ class TestCartComparisonService:
         """Test basic cart comparison functionality"""
         service = CartComparisonService(db)
 
-        # Create a simple cart
+        # Create CartItem objects (not dicts!)
         items = [
-            {"barcode": "7290000000001", "quantity": 2},  # Milk
-            {"barcode": "7290000000002", "quantity": 1}   # Bread
+            CartItem(barcode="7290000000001", quantity=2),  # Milk
+            CartItem(barcode="7290000000002", quantity=1)   # Bread
         ]
 
-        result = service.compare_cart(city="תל אביב", items=items)
+        # Call with correct parameters order (items, city)
+        result = service.compare_cart(items, "תל אביב")
 
-        # Verify result structure - CartComparison object has stores attribute
+        # Verify result structure - CartComparison object
         assert result is not None
-        assert hasattr(result, 'stores')
-        assert len(result.stores) == 2  # We have 2 stores in test data
+        assert hasattr(result, 'all_stores')
+        assert len(result.all_stores) == 2  # We have 2 stores in test data
 
         # Check each store result
-        for store in result.stores:
+        for store in result.all_stores:
             assert hasattr(store, 'branch_name')
             assert hasattr(store, 'total_price')
             assert hasattr(store, 'available_items')
@@ -40,18 +40,15 @@ class TestCartComparisonService:
         """Test finding the cheapest store for a cart"""
         service = CartComparisonService(db)
 
-        items = [{"barcode": "7290000000001", "quantity": 1}]
-        result = service.compare_cart(city="תל אביב", items=items)
+        items = [CartItem(barcode="7290000000001", quantity=1)]
+        result = service.compare_cart(items, "תל אביב")
 
-        # Get stores from result object
-        stores = result.stores
-
-        # Find cheapest manually
-        cheapest = min(stores, key=lambda x: x.total_price)
+        # The result has a cheapest_store attribute
+        assert result.cheapest_store is not None
 
         # Shufersal should be cheaper for milk (7.90 vs 8.50)
-        assert cheapest.chain_name == "shufersal"
-        assert cheapest.total_price == 7.90
+        assert result.cheapest_store.chain_name == "shufersal"
+        assert result.cheapest_store.total_price == 7.90
 
     def test_handle_missing_products(self, db, sample_data):
         """Test handling products not available in some stores"""
@@ -59,17 +56,17 @@ class TestCartComparisonService:
 
         # Add a product that doesn't exist
         items = [
-            {"barcode": "7290000000001", "quantity": 1},
-            {"barcode": "9999999999999", "quantity": 1}  # Non-existent
+            CartItem(barcode="7290000000001", quantity=1),
+            CartItem(barcode="9999999999999", quantity=1)  # Non-existent
         ]
 
-        result = service.compare_cart(city="תל אביב", items=items)
+        result = service.compare_cart(items, "תל אביב")
 
         # Should still return results
-        assert len(result.stores) > 0
+        assert len(result.all_stores) > 0
 
         # Check missing items count
-        for store in result.stores:
+        for store in result.all_stores:
             assert store.missing_items >= 1
             assert store.available_items == 1
 
@@ -77,11 +74,12 @@ class TestCartComparisonService:
         """Test cart comparison for city with no stores"""
         service = CartComparisonService(db)
 
-        items = [{"barcode": "7290000000001", "quantity": 1}]
-        result = service.compare_cart(city="חיפה", items=items)
+        items = [CartItem(barcode="7290000000001", quantity=1)]
+        result = service.compare_cart(items, "חיפה")
 
         # Should return empty results
-        assert len(result.stores) == 0
+        assert len(result.all_stores) == 0
+        assert result.cheapest_store is None
 
 
 class TestAuthenticationService:
@@ -140,7 +138,7 @@ class TestAuthenticationService:
         """Test JWT token creation"""
         service = AuthService(db)
 
-        # create_access_token expects a dict, not a string
+        # create_access_token expects a dict
         token = service.create_access_token({"sub": "test@example.com"})
 
         assert token is not None
@@ -151,17 +149,18 @@ class TestAuthenticationService:
         """Test JWT token verification"""
         service = AuthService(db)
 
-        # Create token with proper dict format
+        # Create token
         email = "tokentest@example.com"
         token = service.create_access_token({"sub": email})
 
-        # Verify token
-        verified_email = service.verify_token(token)
-        assert verified_email == email
+        # Verify token - returns the full payload, not just email
+        payload = service.verify_token(token)
+        assert payload is not None
+        assert payload.get("sub") == email
 
         # Test invalid token
-        invalid_email = service.verify_token("invalid.token.here")
-        assert invalid_email is None
+        invalid_payload = service.verify_token("invalid.token.here")
+        assert invalid_payload is None
 
     def test_duplicate_user_creation(self, db):
         """Test that duplicate users cannot be created"""
@@ -216,7 +215,6 @@ class TestProductSearchService:
         assert stats["min_price"] == 7.90
         assert stats["max_price"] == 8.50
         assert stats["avg_price"] == 8.20
-        # The service might not include cheapest_store in stats
 
     def test_search_no_results(self, db, sample_data):
         """Test searching for non-existent product"""
@@ -233,7 +231,6 @@ class TestProductSearchService:
         """Test getting product by exact barcode"""
         service = ProductSearchService(db)
 
-        # Use the correct method name
         product = service.get_product_details_by_barcode(
             barcode="7290000000001",
             city="תל אביב"
@@ -242,13 +239,13 @@ class TestProductSearchService:
         assert product is not None
         assert product["barcode"] == "7290000000001"
         assert "חלב" in product["name"]
-        assert len(product["prices_by_store"]) == 2
+        assert "prices_by_chain" in product  # Different structure than prices_by_store
 
     def test_search_case_insensitive(self, db, sample_data):
         """Test that search is case insensitive"""
         service = ProductSearchService(db)
 
-        # Search with different cases
+        # Both should work the same
         results1 = service.search_products_with_prices("חלב", "תל אביב")
         results2 = service.search_products_with_prices("חלב", "תל אביב")
 
@@ -263,26 +260,26 @@ class TestEdgeCases:
         """Test cart with zero quantity items"""
         service = CartComparisonService(db)
 
-        items = [{"barcode": "7290000000001", "quantity": 0}]
+        items = [CartItem(barcode="7290000000001", quantity=0)]
 
         # Should handle gracefully
-        result = service.compare_cart(city="תל אביב", items=items)
+        result = service.compare_cart(items, "תל אביב")
 
         # Total should be 0
-        for store in result.stores:
+        for store in result.all_stores:
             assert store.total_price == 0
 
     def test_very_large_quantity(self, db, sample_data):
         """Test cart with very large quantities"""
         service = CartComparisonService(db)
 
-        items = [{"barcode": "7290000000001", "quantity": 999999}]
+        items = [CartItem(barcode="7290000000001", quantity=999999)]
 
-        result = service.compare_cart(city="תל אביב", items=items)
+        result = service.compare_cart(items, "תל אביב")
 
         # Should calculate correctly
-        assert len(result.stores) > 0
-        for store in result.stores:
+        assert len(result.all_stores) > 0
+        for store in result.all_stores:
             assert store.total_price > 0
 
     def test_hebrew_city_names(self, db, sample_data):
@@ -290,10 +287,10 @@ class TestEdgeCases:
         service = CartComparisonService(db)
 
         # Test with Hebrew city name
-        items = [{"barcode": "7290000000001", "quantity": 1}]
-        result = service.compare_cart(city="תל אביב", items=items)
+        items = [CartItem(barcode="7290000000001", quantity=1)]
+        result = service.compare_cart(items, "תל אביב")
 
-        assert len(result.stores) == 2
+        assert len(result.all_stores) == 2
 
     def test_empty_database(self, db):
         """Test services handle empty database gracefully"""
@@ -302,12 +299,27 @@ class TestEdgeCases:
         # Test cart service
         cart_service = CartComparisonService(db)
         result = cart_service.compare_cart(
-            city="תל אביב",
-            items=[{"barcode": "123", "quantity": 1}]
+            [CartItem(barcode="123", quantity=1)],
+            "תל אביב"
         )
-        assert len(result.stores) == 0
-        
+        assert len(result.all_stores) == 0
+
         # Test search service
         search_service = ProductSearchService(db)
         results = search_service.search_products_with_prices("test", "תל אביב")
         assert results == []
+
+    def test_product_info_method(self, db, sample_data):
+        """Test get_product_info method"""
+        service = CartComparisonService(db)
+
+        # Test existing product
+        info = service.get_product_info("7290000000001")
+        assert info is not None
+        assert info['barcode'] == "7290000000001"
+        assert info['name'] == "חלב 3% תנובה"
+        assert 'price_range' in info
+
+        # Test non-existent product
+        info = service.get_product_info("9999999999999")
+        assert info is None

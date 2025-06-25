@@ -1,11 +1,10 @@
 """
-Simplified test configuration for the price comparison server.
-Minimal setup focused on essential functionality.
+Fixed test configuration with correct auth flow.
 """
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 import os
 from datetime import datetime
 
@@ -183,16 +182,13 @@ def sample_data(db):
 @pytest.fixture
 def auth_headers(client):
     """Create a test user and return auth headers"""
-    # Register user
+    # Register user - expect 200 not 201
     register_response = client.post("/api/auth/register", json={
         "email": "test@example.com",
         "password": "testpass123"
     })
 
-    # If registration failed, user might already exist
-    if register_response.status_code != 201:
-        # Try to login anyway
-        pass
+    # If registration failed, user might already exist, try login anyway
 
     # Login to get token
     login_response = client.post("/api/auth/login", data={
@@ -204,8 +200,8 @@ def auth_headers(client):
         token = login_response.json()["access_token"]
         return {"Authorization": f"Bearer {token}"}
     else:
-        # Return empty headers if auth fails
-        return {}
+        # If we can't login, raise an error so we know
+        raise Exception(f"Failed to authenticate test user: {login_response.text}")
 
 
 @pytest.fixture
