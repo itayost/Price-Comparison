@@ -3,21 +3,24 @@ name: Run Tests
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, develop]
   pull_request:
-    branches: [main, master]
+    branches: [main, develop]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache pip packages
         uses: actions/cache@v4
@@ -30,17 +33,27 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          cd price_comparison_server
           pip install -r requirements.txt
-          # Verify pytest is installed
-          python -m pip show pytest
+          pip install pytest-mock pytest-cov pytest-asyncio httpx
 
-      - name: Run tests
+      - name: Run tests with coverage
+        env:
+          TESTING: 'true'
+          SECRET_KEY: 'test-secret-key'
         run: |
-          cd price_comparison_server
-          # Set PYTHONPATH to include the current directory
-          export PYTHONPATH=$PYTHONPATH:$(pwd)
-          echo "PYTHONPATH: $PYTHONPATH"
-          echo "Running tests..."
-          # Use python -m pytest instead of just pytest
-          python -m pytest tests/ -v --cov=. --cov-report=term --cov-report=html
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage-report-${{ matrix.python-version }}
+          path: htmlcov/
