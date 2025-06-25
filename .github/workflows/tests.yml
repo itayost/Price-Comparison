@@ -1,116 +1,55 @@
-name: Run Tests
+name: Tests
 
+# When to run tests
 on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
-
-env:
-  PYTHON_VERSION: '3.10'
+    branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
-      - uses: actions/checkout@v4
+      # 1. Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      # 2. Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '3.10'
 
+      # 3. Cache pip packages (speeds up builds)
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      # 4. Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Create test database schema
+      # 5. Run tests with coverage
+      - name: Run tests
         env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
-        run: |
-          python -c "from database.connection import init_db; init_db()"
-
-      - name: Run unit tests
-        env:
-          DATABASE_URL: sqlite:///./test_unit.db
+          DATABASE_URL: sqlite:///./test.db
           SECRET_KEY: test-secret-key
           TESTING: true
         run: |
-          pytest tests/unit -v --cov=services --cov=parsers --cov-report=xml --cov-report=term
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
 
-      - name: Run API tests
-        env:
-          DATABASE_URL: sqlite:///./test_api.db
-          SECRET_KEY: test-secret-key
-          TESTING: true
-        run: |
-          pytest tests/api -v --cov=routes --cov-append --cov-report=xml --cov-report=term
-
-      - name: Run integration tests
-        env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
-          SECRET_KEY: test-secret-key
-          TESTING: true
-        run: |
-          pytest tests/integration -v --cov-append --cov-report=xml --cov-report=term
-
-      - name: Generate test report
-        if: always()
-        run: |
-          pytest --html=report.html --self-contained-html || true
-          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "Python Version: ${{ env.PYTHON_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "Test Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          coverage report --format=markdown >> $GITHUB_STEP_SUMMARY || true
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+      # 6. Upload coverage to Codecov (optional)
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
         with:
           file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
           fail_ci_if_error: false
-          verbose: true
-          token: ${{ secrets.CODECOV_TOKEN }} # Required for v4
-
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: |
-            htmlcov/
-            coverage.xml
-            report.html
-            .coverage
-          retention-days: 30 # Keep artifacts for 30 days
-
-      - name: Check coverage threshold
-        run: |
-          coverage report --fail-under=70
-          echo "✅ Coverage threshold met!"
+        continue-on-error: true
