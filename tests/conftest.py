@@ -1,12 +1,13 @@
 """
-Test configuration for the price comparison server.
-Focused on essential functionality.
+Simplified test configuration for the price comparison server.
+Minimal setup focused on essential functionality.
 """
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 import os
+from datetime import datetime
 
 # Set test environment
 os.environ["TESTING"] = "true"
@@ -21,7 +22,7 @@ from main import app
 # Simple in-memory database for tests
 TEST_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
-    TEST_DATABASE_URL, 
+    TEST_DATABASE_URL,
     connect_args={"check_same_thread": False}
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -32,12 +33,12 @@ def db():
     """Create a fresh database for each test"""
     # Create tables
     Base.metadata.create_all(bind=engine)
-    
+
     # Create session
     db = TestingSessionLocal()
-    
+
     yield db
-    
+
     # Cleanup
     db.close()
     Base.metadata.drop_all(bind=engine)
@@ -51,12 +52,12 @@ def client(db):
             yield db
         finally:
             pass
-    
+
     app.dependency_overrides[get_db_session] = override_get_db
-    
+
     with TestClient(app) as test_client:
         yield test_client
-    
+
     app.dependency_overrides.clear()
 
 
@@ -65,17 +66,17 @@ def sample_data(db):
     """Create minimal test data for price comparison"""
     # Create chains
     shufersal = Chain(
-        chain_id=1, 
-        name="shufersal", 
+        chain_id=1,
+        name="shufersal",
         display_name="שופרסל"
     )
     victory = Chain(
-        chain_id=2, 
-        name="victory", 
+        chain_id=2,
+        name="victory",
         display_name="ויקטורי"
     )
     db.add_all([shufersal, victory])
-    
+
     # Create branches in Tel Aviv
     branch_shufersal = Branch(
         branch_id=1,
@@ -88,81 +89,78 @@ def sample_data(db):
     branch_victory = Branch(
         branch_id=2,
         chain_id=2,
-        store_id="001", 
+        store_id="001",
         name="ויקטורי סנטר",
         address="דיזנגוף סנטר",
         city="תל אביב"
     )
     db.add_all([branch_shufersal, branch_victory])
-    
+
     # Create sample products (milk and bread)
     products = [
         ChainProduct(
-            product_id=1,
+            chain_product_id=1,
             chain_id=1,
             barcode="7290000000001",
-            name="חלב 3% תנובה",
-            manufacturer="תנובה"
+            name="חלב 3% תנובה"
         ),
         ChainProduct(
-            product_id=2,
+            chain_product_id=2,
             chain_id=2,
             barcode="7290000000001",
-            name="חלב 3% תנובה",
-            manufacturer="תנובה"
+            name="חלב 3% תנובה"
         ),
         ChainProduct(
-            product_id=3,
+            chain_product_id=3,
             chain_id=1,
             barcode="7290000000002",
-            name="לחם אחיד",
-            manufacturer="אנג'ל"
+            name="לחם אחיד"
         ),
         ChainProduct(
-            product_id=4,
+            chain_product_id=4,
             chain_id=2,
             barcode="7290000000002",
-            name="לחם אחיד",
-            manufacturer="אנג'ל"
+            name="לחם אחיד"
         )
     ]
     db.add_all(products)
-    
-    # Create prices
+
+    # Create prices with timestamps
+    current_time = datetime.utcnow()
     prices = [
         BranchPrice(
             price_id=1,
             branch_id=1,
-            product_id=1,
-            barcode="7290000000001",
-            price=7.90
+            chain_product_id=1,
+            price=7.90,
+            last_updated=current_time
         ),
         BranchPrice(
             price_id=2,
             branch_id=2,
-            product_id=2,
-            barcode="7290000000001",
-            price=8.50
+            chain_product_id=2,
+            price=8.50,
+            last_updated=current_time
         ),
         BranchPrice(
             price_id=3,
             branch_id=1,
-            product_id=3,
-            barcode="7290000000002",
-            price=5.90
+            chain_product_id=3,
+            price=5.90,
+            last_updated=current_time
         ),
         BranchPrice(
             price_id=4,
             branch_id=2,
-            product_id=4,
-            barcode="7290000000002",
-            price=5.50
+            chain_product_id=4,
+            price=5.50,
+            last_updated=current_time
         )
     ]
     db.add_all(prices)
-    
+
     db.commit()
-    
+
     return {
         "chains": [shufersal, victory],
         "branches": [branch_shufersal, branch_victory],
@@ -179,13 +177,13 @@ def auth_headers(client):
         "email": "test@example.com",
         "password": "testpass123"
     })
-    
+
     # Login to get token
     login_response = client.post("/api/auth/login", data={
         "username": "test@example.com",
         "password": "testpass123"
     })
-    
+
     token = login_response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
