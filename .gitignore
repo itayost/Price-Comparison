@@ -1,0 +1,130 @@
+# ===== Environment & Secrets =====
+.env
+.env.*
+*.env
+!.env.example
+
+# Oracle Wallet (CRITICAL - contains credentials!)
+wallet/
+*.pem
+*.sso
+*.p12
+*.jks
+*.ora
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+price_comparison_server/venv/
+
+# ===== Databases =====
+*.db
+*.sqlite
+*.sqlite3
+users.db
+test.db
+test_diagnostic.db
+
+# Price data directories (large scraped data)
+shufersal_prices/
+victory_prices/
+price_comparison_server/shufersal_prices/
+price_comparison_server/victory_prices/
+
+# ===== Testing & Coverage =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ===== IDEs & Editors =====
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ===== Logs & Temporary Files =====
+*.log
+logs/
+*.tmp
+*.temp
+*.bak
+backup/
+price_comparison_server/backup/
+
+# ===== OS Files =====
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# ===== Project Specific =====
+# Jupyter Notebooks (if any)
+.ipynb_checkpoints/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Railway deployment
+.railway/
