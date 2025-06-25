@@ -113,29 +113,33 @@ def sample_data(db):
     db.add_all(products)
     db.commit()
 
-    # Create prices
+    # Create prices with correct indexing
+    # products[0] = Shufersal Milk
+    # products[1] = Shufersal Bread
+    # products[2] = Victory Milk
+    # products[3] = Victory Bread
     prices = [
         BranchPrice(
             branch_id=branch_shufersal.branch_id,
-            chain_product_id=products[0].chain_product_id,
+            chain_product_id=products[0].chain_product_id,  # Shufersal Milk
             price=7.90,
             last_updated=datetime.utcnow()
         ),
         BranchPrice(
             branch_id=branch_victory.branch_id,
-            chain_product_id=products[1].chain_product_id,
+            chain_product_id=products[2].chain_product_id,  # Victory Milk (not products[1]!)
             price=8.50,
             last_updated=datetime.utcnow()
         ),
         BranchPrice(
             branch_id=branch_shufersal.branch_id,
-            chain_product_id=products[2].chain_product_id,
+            chain_product_id=products[1].chain_product_id,  # Shufersal Bread
             price=5.90,
             last_updated=datetime.utcnow()
         ),
         BranchPrice(
             branch_id=branch_victory.branch_id,
-            chain_product_id=products[3].chain_product_id,
+            chain_product_id=products[3].chain_product_id,  # Victory Bread (not products[2]!)
             price=5.50,
             last_updated=datetime.utcnow()
         )
