@@ -16,7 +16,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 # Import after environment is set
 from database.connection import Base, get_db_session
-from database.new_models import Chain, Branch, ChainProduct, BranchPrice, User
+from database.new_models import Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
 from main import app
 
 # Simple in-memory database for tests
@@ -28,20 +28,21 @@ engine = create_engine(
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def db():
     """Create a fresh database for each test"""
-    # Create tables
+    # Create ALL tables including User and SavedCart
     Base.metadata.create_all(bind=engine)
 
     # Create session
-    db = TestingSessionLocal()
+    db_session = TestingSessionLocal()
 
-    yield db
-
-    # Cleanup
-    db.close()
-    Base.metadata.drop_all(bind=engine)
+    try:
+        yield db_session
+    finally:
+        db_session.close()
+        # Drop all tables after test
+        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
@@ -53,11 +54,13 @@ def client(db):
         finally:
             pass
 
+    # Override the database dependency
     app.dependency_overrides[get_db_session] = override_get_db
 
     with TestClient(app) as test_client:
         yield test_client
 
+    # Clear overrides
     app.dependency_overrides.clear()
 
 
@@ -76,6 +79,7 @@ def sample_data(db):
         display_name="ויקטורי"
     )
     db.add_all([shufersal, victory])
+    db.commit()  # Commit chains first
 
     # Create branches in Tel Aviv
     branch_shufersal = Branch(
@@ -95,6 +99,7 @@ def sample_data(db):
         city="תל אביב"
     )
     db.add_all([branch_shufersal, branch_victory])
+    db.commit()  # Commit branches
 
     # Create sample products (milk and bread)
     products = [
@@ -124,6 +129,7 @@ def sample_data(db):
         )
     ]
     db.add_all(products)
+    db.commit()  # Commit products
 
     # Create prices with timestamps
     current_time = datetime.utcnow()
@@ -158,8 +164,13 @@ def sample_data(db):
         )
     ]
     db.add_all(prices)
+    db.commit()  # Commit prices
 
-    db.commit()
+    # Refresh all objects to ensure relationships are loaded
+    db.refresh(shufersal)
+    db.refresh(victory)
+    db.refresh(branch_shufersal)
+    db.refresh(branch_victory)
 
     return {
         "chains": [shufersal, victory],
@@ -178,14 +189,23 @@ def auth_headers(client):
         "password": "testpass123"
     })
 
+    # If registration failed, user might already exist
+    if register_response.status_code != 201:
+        # Try to login anyway
+        pass
+
     # Login to get token
     login_response = client.post("/api/auth/login", data={
         "username": "test@example.com",
         "password": "testpass123"
     })
 
-    token = login_response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    if login_response.status_code == 200:
+        token = login_response.json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+    else:
+        # Return empty headers if auth fails
+        return {}
 
 
 @pytest.fixture

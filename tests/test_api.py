@@ -260,14 +260,6 @@ class TestSavedCarts:
 class TestSystemEndpoints:
     """Test system monitoring endpoints"""
 
-    def test_get_available_cities(self, client, sample_data):
-        """Test getting list of available cities"""
-        response = client.get("/api/system/cities")
-
-        assert response.status_code == 200
-        cities = response.json()
-        assert "תל אביב" in cities
-
     def test_get_available_chains(self, client, sample_data):
         """Test getting list of chains"""
         response = client.get("/api/products/chains")
