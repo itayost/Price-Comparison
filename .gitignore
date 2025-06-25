@@ -128,3 +128,25 @@ dmypy.json
 
 # Railway deployment
 .railway/
+
+# ===== Testing & Coverage =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage.json
+*.cover
+.hypothesis/
+pytest_cache/
+test_*.db
+test.db
+
+# Test reports
+report.html
+assets/
+
+# Temporary test files
+tests/temp/
+tests/tmp/
+*_test_*.py

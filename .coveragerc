@@ -1,121 +1,28 @@
-# .coveragerc - Coverage.py configuration file
+# Simple coverage configuration for university project
 
 [run]
-# Source packages to measure coverage
 source = .
-
-# Patterns to omit from coverage
 omit =
-    # Test files
     */tests/*
-    tests/*
-    *_test.py
+    */venv/*
+    */oracle_venv/*
+    */__pycache__/*
+    setup.py
+    run_*.py
     test_*.py
 
-    # Virtual environments
-    */venv/*
-    */env/*
-    */.venv/*
-   */venv_oracle/*
-
-    # Python cache
-    */__pycache__/*
-    *.pyc
-
-    # Package management
-    */site-packages/*
-    setup.py
-
-    # Scripts folder (data import scripts)
-    scripts/*
-
-    # Test and diagnostic files
-    tests/diagnose_issues.py
-
-    # Configuration and deployment files
-    railway.json
-    run_oracle.sh
-
-    # External libraries
-    /usr/*
-
-# Run coverage in parallel mode for pytest-xdist
-parallel = True
-
-# Include branch coverage
-branch = True
-
-# Data file name
-data_file = .coverage
-
 [report]
-# Precision of coverage percentage
-precision = 2
-
-# Show lines that weren't covered
+# Simple, clear output
+precision = 1
 show_missing = True
+skip_covered = True
 
-# Skip files with 100% coverage in report
-skip_covered = False
-
-# Sort report by coverage percentage
-sort = Cover
-
-# Exclude specific lines from coverage
+# Only exclude lines we really don't care about
 exclude_lines =
-    # Have to re-enable the standard pragma
     pragma: no cover
-
-    # Don't complain about missing debug-only code:
-    def __repr__
-    def __str__
-
-    # Don't complain if tests don't hit defensive assertion code:
-    raise AssertionError
-    raise NotImplementedError
-
-    # Don't complain if non-runnable code isn't run:
     if __name__ == .__main__.:
-    if TYPE_CHECKING:
-
-    # Don't complain about abstract methods
-    @(abc\.)?abstractmethod
-    @(abc\.)?abstractproperty
-
-    # Defensive programming
-    except ImportError
-    except Exception as e:
-
-    # Logging statements
-    logger\.
-    logging\.
-
-    # Type checking blocks
-    if typing.TYPE_CHECKING:
-
-# Ignore errors if source code is not found
-ignore_errors = True
+    pass
 
 [html]
-# Directory for HTML coverage report
 directory = htmlcov
-
-# Title for the HTML report
-title = Price Comparison Server Coverage Report
-
-[xml]
-# Output file for XML report (for CI/CD tools)
-output = coverage.xml
-
-[json]
-# Output file for JSON report
-output = coverage.json
-
-# Pretty print the JSON
-pretty_print = True
-
-[paths]
-# Map paths for combining coverage data from different locations
-source =
-    .
-    /app  # Docker container path
+title = Price Comparison Coverage Report
