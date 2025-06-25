@@ -35,10 +35,10 @@ from database.new_models import (
     User, SavedCart
 )
 from services.auth_service import AuthService
-from services.cart_service import CartComparisonService
+from services.cart_service import CartComparisonService, CartItem
 from services.product_search_service import ProductSearchService
 from main import app
-from tests.fixtures.sample_products import SAMPLE_CART_ITEMS
+from tests.fixtures.sample_products import SAMPLE_CART_ITEMS, create_test_database_data
 
 # =====================================================
 # Database Setup
@@ -76,7 +76,6 @@ def setup_test_database():
 def db_session(setup_test_database) -> Generator[Session, None, None]:
     """
     Create a fresh database session for each test.
-
     Uses transaction rollback to ensure test isolation.
     """
     connection = engine.connect()
@@ -104,7 +103,6 @@ def db_session(setup_test_database) -> Generator[Session, None, None]:
 def client(db_session: Session) -> Generator[TestClient, None, None]:
     """
     Create a FastAPI test client with database override.
-
     This client will use the test database session for all requests.
     """
     # Override the database dependency
@@ -167,6 +165,11 @@ def admin_user(db_session: Session) -> User:
     """Create an admin user (if your app has admin functionality)"""
     auth_service = AuthService(db_session)
 
+    # Check if already exists
+    existing = auth_service.get_user_by_email("admin@example.com")
+    if existing:
+        return existing
+
     user = auth_service.create_user(
         email="admin@example.com",
         password="adminpass123"
@@ -186,11 +189,11 @@ def test_chains(db_session: Session) -> Dict[str, Chain]:
     """Create test supermarket chains"""
     chains = {
         'shufersal': Chain(name='shufersal', display_name='שופרסל'),
-        'victory': Chain(name='victory', display_name='ויקטורי'),
-        'rami_levy': Chain(name='rami_levy', display_name='רמי לוי')
+        'victory': Chain(name='victory', display_name='ויקטורי')
     }
 
-    db_session.add_all(chains.values())
+    for chain in chains.values():
+        db_session.add(chain)
     db_session.commit()
 
     return chains
@@ -198,9 +201,8 @@ def test_chains(db_session: Session) -> Dict[str, Chain]:
 
 @pytest.fixture
 def test_branches(db_session: Session, test_chains: Dict[str, Chain]) -> Dict[str, Branch]:
-    """Create test branches in multiple cities"""
+    """Create test branches in different cities"""
     branches = {
-        # Tel Aviv branches
         'shufersal_dizengoff': Branch(
             chain_id=test_chains['shufersal'].chain_id,
             store_id='001',
@@ -208,46 +210,31 @@ def test_branches(db_session: Session, test_chains: Dict[str, Chain]) -> Dict[st
             address='דיזנגוף 50',
             city='תל אביב'
         ),
-        'shufersal_ramat_aviv': Branch(
-            chain_id=test_chains['shufersal'].chain_id,
-            store_id='002',
-            name='שופרסל רמת אביב',
-            address='איינשטיין 40',
-            city='תל אביב'
-        ),
-        'victory_center': Branch(
-            chain_id=test_chains['victory'].chain_id,
-            store_id='001',
-            name='ויקטורי סנטר',
-            address='דיזנגוף סנטר',
-            city='תל אביב'
-        ),
-        'victory_port': Branch(
-            chain_id=test_chains['victory'].chain_id,
-            store_id='002',
-            name='ויקטורי נמל תל אביב',
-            address='הנמל 24',
-            city='תל אביב'
-        ),
-
-        # Haifa branches
         'shufersal_haifa': Branch(
             chain_id=test_chains['shufersal'].chain_id,
             store_id='010',
             name='שופרסל חיפה',
-            address='שדרות הנשיא 100',
+            address='חורב 15',
             city='חיפה'
         ),
-        'rami_levy_haifa': Branch(
-            chain_id=test_chains['rami_levy'].chain_id,
+        'victory_tlv': Branch(
+            chain_id=test_chains['victory'].chain_id,
             store_id='001',
-            name='רמי לוי חיפה',
-            address='דרך יפו 50',
+            name='ויקטורי דיזנגוף סנטר',
+            address='דיזנגוף סנטר',
+            city='תל אביב'
+        ),
+        'victory_haifa': Branch(
+            chain_id=test_chains['victory'].chain_id,
+            store_id='005',
+            name='ויקטורי גרנד קניון',
+            address='גרנד קניון',
             city='חיפה'
         )
     }
 
-    db_session.add_all(branches.values())
+    for branch in branches.values():
+        db_session.add(branch)
     db_session.commit()
 
     return branches
@@ -255,114 +242,84 @@ def test_branches(db_session: Session, test_chains: Dict[str, Chain]) -> Dict[st
 
 @pytest.fixture
 def test_products(db_session: Session, test_chains: Dict[str, Chain]) -> Dict[str, ChainProduct]:
-    """Create test products for all chains"""
+    """Create test products for each chain"""
     products = {}
 
-    # Common products with variations in naming between chains
+    # Common products available in both chains
     product_data = [
-        ('7290000000001', 'חלב טרה 3% 1 ליטר', 'חלב 3% טרה 1 ליטר', 'חלב טרה 3%'),
-        ('7290000000002', 'לחם אחיד פרוס', 'לחם אחיד', 'לחם לבן פרוס'),
-        ('7290000000003', 'ביצים L 12 יחידות', 'ביצים גודל L', 'ביצים L תריסר'),
-        ('7290000000004', 'קוטג׳ 5%', 'גבינת קוטג׳ 5%', 'קוטג 5% טרה'),
-        ('7290000000005', 'עגבניות', 'עגבניות שרי', 'עגבניות אשכול'),
-        ('7290000000006', 'חומוס אחלה', 'חומוס אחלה 400 גרם', 'חומוס אחלה'),
-        ('7290000000007', 'קולה 1.5 ליטר', 'קוקה קולה 1.5L', 'קוקה קולה 1.5'),
-        ('7290000000008', 'אורז פרסי', 'אורז פרסי 1 קג', 'אורז לבן פרסי'),
-        ('7290000000009', 'שמן זית', 'שמן זית כתית', 'שמן זית בכתית'),
-        ('7290000000010', 'סוכר לבן', 'סוכר לבן 1 קג', 'סוכר גבישי')
+        ('7290000000001', 'חלב טרה 3%'),
+        ('7290000000002', 'לחם אחיד פרוס'),
+        ('7290000000003', 'ביצים L 12 יח'),
+        ('7290000000004', 'עגבניות'),
+        ('7290000000005', 'מים מינרלים 1.5 ליטר')
     ]
 
-    # Create products for each chain
-    for i, (barcode, shufersal_name, victory_name, rami_levy_name) in enumerate(product_data):
-        # Shufersal product
-        if 'shufersal' in test_chains:
-            shufersal_product = ChainProduct(
-                chain_id=test_chains['shufersal'].chain_id,
+    for chain_name, chain in test_chains.items():
+        for barcode, name in product_data:
+            key = f"{chain_name}_{barcode}"
+            products[key] = ChainProduct(
+                chain_id=chain.chain_id,
                 barcode=barcode,
-                name=shufersal_name
+                name=name if chain_name == 'shufersal' else name.replace('טרה', 'תנובה')
             )
-            products[f'shufersal_{barcode}'] = shufersal_product
+            db_session.add(products[key])
 
-        # Victory product
-        if 'victory' in test_chains:
-            victory_product = ChainProduct(
-                chain_id=test_chains['victory'].chain_id,
-                barcode=barcode,
-                name=victory_name
-            )
-            products[f'victory_{barcode}'] = victory_product
-
-        # Rami Levy product
-        if 'rami_levy' in test_chains:
-            rami_levy_product = ChainProduct(
-                chain_id=test_chains['rami_levy'].chain_id,
-                barcode=barcode,
-                name=rami_levy_name
-            )
-            products[f'rami_levy_{barcode}'] = rami_levy_product
-
-    db_session.add_all(products.values())
     db_session.commit()
-
     return products
 
 
 @pytest.fixture
-def test_prices(db_session: Session, test_branches: Dict[str, Branch],
-                test_products: Dict[str, ChainProduct]) -> Dict[str, BranchPrice]:
-    """Create realistic test prices for products at different branches"""
+def test_prices(
+    db_session: Session,
+    test_branches: Dict[str, Branch],
+    test_products: Dict[str, ChainProduct]
+) -> Dict[str, BranchPrice]:
+    """Create test prices for products in branches"""
     prices = {}
 
-    # Realistic price data (barcode -> chain -> price)
-    price_data = {
-        '7290000000001': {'shufersal': 5.90, 'victory': 6.20, 'rami_levy': 5.50},   # Milk
-        '7290000000002': {'shufersal': 7.50, 'victory': 6.90, 'rami_levy': 6.50},   # Bread
-        '7290000000003': {'shufersal': 12.90, 'victory': 13.50, 'rami_levy': 11.90}, # Eggs
-        '7290000000004': {'shufersal': 4.50, 'victory': 4.50, 'rami_levy': 4.20},   # Cottage
-        '7290000000005': {'shufersal': 8.90, 'victory': 7.90, 'rami_levy': 8.50},   # Tomatoes
-        '7290000000006': {'shufersal': 9.90, 'victory': 10.50, 'rami_levy': 8.90},  # Hummus
-        '7290000000007': {'shufersal': 7.90, 'victory': 8.50, 'rami_levy': 7.50},   # Cola
-        '7290000000008': {'shufersal': 12.90, 'victory': 13.90, 'rami_levy': 11.50}, # Rice
-        '7290000000009': {'shufersal': 29.90, 'victory': 31.90, 'rami_levy': 27.90}, # Olive Oil
-        '7290000000010': {'shufersal': 5.90, 'victory': 5.50, 'rami_levy': 5.20}    # Sugar
-    }
+    # Price mapping
+    price_data = [
+        ('shufersal_dizengoff', 'shufersal_7290000000001', 5.90),
+        ('shufersal_dizengoff', 'shufersal_7290000000002', 7.50),
+        ('shufersal_dizengoff', 'shufersal_7290000000003', 14.90),
+        ('victory_tlv', 'victory_7290000000001', 5.50),
+        ('victory_tlv', 'victory_7290000000002', 8.90),
+        ('victory_tlv', 'victory_7290000000003', 13.90),
+        ('shufersal_haifa', 'shufersal_7290000000001', 5.50),
+        ('shufersal_haifa', 'shufersal_7290000000002', 6.90),
+        ('victory_haifa', 'victory_7290000000001', 5.20),
+        ('victory_haifa', 'victory_7290000000002', 7.90)
+    ]
 
-    # Create prices for each product at each branch
-    for barcode, chain_prices in price_data.items():
-        for chain_name, price in chain_prices.items():
-            product_key = f'{chain_name}_{barcode}'
-            if product_key in test_products:
-                product = test_products[product_key]
+    for branch_key, product_key, price_value in price_data:
+        if branch_key in test_branches and product_key in test_products:
+            key = f"{branch_key}_{product_key}"
+            prices[key] = BranchPrice(
+                chain_product_id=test_products[product_key].chain_product_id,
+                branch_id=test_branches[branch_key].branch_id,
+                price=price_value,
+                last_updated=datetime.utcnow()
+            )
+            db_session.add(prices[key])
 
-                # Add price to all branches of this chain
-                for branch_key, branch in test_branches.items():
-                    if chain_name in branch_key:
-                        branch_price = BranchPrice(
-                            chain_product_id=product.chain_product_id,
-                            branch_id=branch.branch_id,
-                            price=price,
-                            last_updated=datetime.utcnow()
-                        )
-                        prices[f'{branch_key}_{barcode}'] = branch_price
-
-    db_session.add_all(prices.values())
     db_session.commit()
-
     return prices
 
 
+@pytest.fixture
+def comprehensive_test_data(db_session: Session) -> Dict[str, Any]:
+    """Create comprehensive test data using the helper function"""
+    return create_test_database_data(db_session)
+
+
 # =====================================================
-# Sample Data Fixtures
+# Utility Fixtures
 # =====================================================
 
 @pytest.fixture
 def sample_cart_items() -> List[Dict[str, Any]]:
-    """Sample cart items for testing cart comparison"""
-    return [
-        {"barcode": "7290000000001", "quantity": 2, "name": "חלב"},
-        {"barcode": "7290000000002", "quantity": 1, "name": "לחם"},
-        {"barcode": "7290000000003", "quantity": 1, "name": "ביצים"}
-    ]
+    """Sample cart items for comparison"""
+    return SAMPLE_CART_ITEMS
 
 
 @pytest.fixture
@@ -429,7 +386,7 @@ def mock_datetime(monkeypatch):
 
 
 @pytest.fixture
-def hebrew_text_samples() -> Dict[str, str]:
+def hebrew_text_samples() -> Dict[str, List[str]]:
     """Sample Hebrew text for testing"""
     return {
         "product_names": ["חלב", "לחם", "ביצים", "גבינה", "עגבניות"],
