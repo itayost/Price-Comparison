@@ -1,39 +1,57 @@
 """
-Test configuration that ensures database tables are created properly.
+Test configuration that properly handles all database connections.
 """
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
 import os
 from datetime import datetime
+import sys
 
 # Set test environment BEFORE any imports
 os.environ["TESTING"] = "true"
 os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["USE_ORACLE"] = "false"
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 # Create test database engine
 TEST_DATABASE_URL = "sqlite:///:memory:"
 test_engine = create_engine(
     TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False},
+    poolclass=None  # Disable connection pooling for SQLite
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
-# CRITICAL: Patch database module BEFORE importing anything else
+# CRITICAL: Patch database module BEFORE any other imports
 import database.connection
+
+# Replace the engine and SessionLocal
 database.connection.engine = test_engine
 database.connection.SessionLocal = TestingSessionLocal
 
-# Force the test database URL
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+# Also patch the module-level imports that might have been cached
+if 'routes.product_routes' in sys.modules:
+    del sys.modules['routes.product_routes']
+if 'routes.cart_routes' in sys.modules:
+    del sys.modules['routes.cart_routes']
+if 'routes.auth_routes' in sys.modules:
+    del sys.modules['routes.auth_routes']
+if 'routes.saved_carts_routes' in sys.modules:
+    del sys.modules['routes.saved_carts_routes']
 
-# Import models and create tables BEFORE importing app
+# Import models and create tables
 from database.new_models import Base, Chain, Branch, ChainProduct, BranchPrice, User, SavedCart
 
-# Create all tables in the test database
+# Create all tables in test database
 Base.metadata.create_all(bind=test_engine)
+
+# Verify tables exist
+with test_engine.connect() as conn:
+    result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+    tables = [row[0] for row in result]
+    print(f"Tables created in test DB: {tables}")
 
 # NOW import the app (it will use our patched database)
 from main import app
@@ -41,19 +59,18 @@ from database.connection import get_db_session
 
 
 @pytest.fixture(scope="session")
-def setup_database():
-    """Create tables once for all tests"""
-    # Tables already created above
-    yield
-    # Cleanup after all tests
-    Base.metadata.drop_all(bind=test_engine)
+def engine():
+    """Provide the test engine"""
+    return test_engine
 
 
 @pytest.fixture(scope="function")
-def db(setup_database):
-    """Get a database session and clean up data after each test"""
-    connection = test_engine.connect()
+def db(engine):
+    """Create a new database session for a test"""
+    connection = engine.connect()
     transaction = connection.begin()
+
+    # Create session bound to the connection
     session = TestingSessionLocal(bind=connection)
 
     yield session
@@ -66,17 +83,24 @@ def db(setup_database):
 @pytest.fixture
 def client(db):
     """Create test client with database override"""
+    # Override the main get_db_session
     def override_get_db():
         try:
             yield db
         finally:
             pass
 
-    # Override the database dependency
     app.dependency_overrides[get_db_session] = override_get_db
 
-    # Also ensure any direct SessionLocal() calls use our test db
-    # This is handled by the monkey patching above
+    # Also override the route-specific get_db functions
+    # Import them after module cleanup
+    from routes.product_routes import get_db as product_get_db
+    from routes.cart_routes import get_db as cart_get_db
+    from routes.saved_carts_routes import get_db as saved_get_db
+
+    app.dependency_overrides[product_get_db] = override_get_db
+    app.dependency_overrides[cart_get_db] = override_get_db
+    app.dependency_overrides[saved_get_db] = override_get_db
 
     with TestClient(app) as test_client:
         yield test_client
@@ -86,7 +110,14 @@ def client(db):
 
 @pytest.fixture
 def sample_data(db):
-    """Create test data for each test"""
+    """Create test data"""
+    # Clean any existing data
+    db.query(BranchPrice).delete()
+    db.query(ChainProduct).delete()
+    db.query(Branch).delete()
+    db.query(Chain).delete()
+    db.commit()
+
     # Create chains
     shufersal = Chain(name="shufersal", display_name="שופרסל")
     victory = Chain(name="victory", display_name="ויקטורי")
@@ -175,21 +206,18 @@ def sample_data(db):
 
 @pytest.fixture
 def auth_headers(client, db):
-    """Create a test user and return auth headers"""
-    # First, ensure we have a clean user
-    existing_user = db.query(User).filter_by(email="test@example.com").first()
-    if existing_user:
-        db.delete(existing_user)
-        db.commit()
+    """Create test user and return auth headers"""
+    # Clean existing users
+    db.query(User).filter_by(email="test@example.com").delete()
+    db.commit()
 
-    # Register new user
+    # Register user
     register_response = client.post("/api/auth/register", json={
         "email": "test@example.com",
         "password": "testpass123"
     })
 
     if register_response.status_code != 200:
-        # If registration failed, try to understand why
         print(f"Registration failed: {register_response.text}")
 
     # Login
@@ -203,14 +231,6 @@ def auth_headers(client, db):
         return {"Authorization": f"Bearer {token}"}
 
     raise Exception(f"Failed to authenticate: {login_response.text}")
-
-
-@pytest.fixture(autouse=True)
-def reset_db_between_tests(db):
-    """Ensure clean state between tests"""
-    yield
-    # Clean up any data created during the test
-    db.rollback()
 
 
 @pytest.fixture
