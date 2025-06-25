@@ -32,10 +32,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.connection import Base, get_db_session
 from database.new_models import (
     Chain, Branch, Product, ChainProduct, BranchPrice,
-    User, SavedCart, ComparisonHistory
+    User, SavedCart
 )
 from services.auth_service import AuthService
-from services.cart_comparison_service import CartComparisonService
+from services.cart_service import CartComparisonService
 from services.product_search_service import ProductSearchService
 from main import app
 
