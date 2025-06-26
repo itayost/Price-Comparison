@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # price_comparison_server/scripts/import_prices.py
 
 import os
@@ -7,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 import logging
 from datetime import datetime
+from sqlalchemy import func
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -14,19 +14,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from database.connection import get_db
 from database.new_models import Chain, Branch, ChainProduct, BranchPrice
 from parsers import get_parser
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
 class PriceImporter:
-    """Import price data using the new schema"""
+    """Import price data from chains to database"""
 
     def __init__(self):
         self.stats = {
@@ -40,21 +35,21 @@ class PriceImporter:
 
     def import_chain_prices(self, chain_name: str, limit_files: int = None):
         """Import prices for a specific chain"""
-        logger.info(f"\n{'='*50}")
-        logger.info(f"Importing prices for {chain_name.upper()}")
-        logger.info(f"{'='*50}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Starting price import for {chain_name}")
+        logger.info(f"{'='*60}")
 
         # Get parser
-        try:
-            parser = get_parser(chain_name)
-        except Exception as e:
-            logger.error(f"Failed to get parser for {chain_name}: {e}")
+        parser = get_parser(chain_name)
+        if not parser:
+            logger.error(f"No parser available for {chain_name}")
             return
 
-        # Get branch mappings
+        # Get branch mappings (store_id -> branch_id)
         branch_mappings = self.get_branch_mappings(chain_name)
         if not branch_mappings:
-            logger.error(f"No branches found for {chain_name}. Did you import stores first?")
+            logger.error(f"No branches found for {chain_name}.")
+            logger.info("Did you import stores first?")
             logger.info("Run: python scripts/import_stores.py")
             return
 
@@ -184,8 +179,7 @@ class PriceImporter:
                     chain_product = ChainProduct(
                         chain_id=chain_id,
                         barcode=barcode,
-                        name=price_data.get('name', f'Product {barcode}'),
-                        product_id=None  # Will be matched later in a separate process
+                        name=price_data.get('name', f'Product {barcode}')
                     )
                     db.add(chain_product)
                     db.flush()  # Get the ID without committing
@@ -222,18 +216,12 @@ class PriceImporter:
                     db.add(branch_price)
                     self.stats['prices_created'] += 1
 
-            except IntegrityError as e:
-                # Handle unique constraint violations
-                logger.debug(f"Integrity error (likely duplicate): {e}")
-                db.rollback()
-                continue
             except Exception as e:
-                logger.debug(f"Error processing price: {e}")
+                logger.error(f"Error processing item: {e}")
                 self.stats['errors'] += 1
-                continue
 
     def log_progress(self):
-        """Log current progress"""
+        """Log current import progress"""
         logger.info(f"\nProgress Update:")
         logger.info(f"  Products created: {self.stats['products_created']:,}")
         logger.info(f"  Products updated: {self.stats['products_updated']:,}")
@@ -243,24 +231,22 @@ class PriceImporter:
         logger.info(f"  Errors: {self.stats['errors']:,}")
 
     def show_summary(self):
-        """Show final summary"""
-        logger.info(f"\n{'='*50}")
+        """Show final import summary"""
+        logger.info(f"\n{'='*60}")
         logger.info("IMPORT SUMMARY")
-        logger.info(f"{'='*50}")
+        logger.info(f"{'='*60}")
 
-        self.log_progress()
+        logger.info(f"Products created: {self.stats['products_created']:,}")
+        logger.info(f"Products updated: {self.stats['products_updated']:,}")
+        logger.info(f"Prices created: {self.stats['prices_created']:,}")
+        logger.info(f"Prices updated: {self.stats['prices_updated']:,}")
+        logger.info(f"Branches skipped: {self.stats['branches_skipped']:,}")
+        logger.info(f"Errors: {self.stats['errors']:,}")
 
-        # Show database totals
+        # Show database statistics
         with get_db() as db:
-            total_products = db.query(func.count(ChainProduct.chain_product_id)).scalar()
-            total_prices = db.query(func.count(BranchPrice.price_id)).scalar()
+            logger.info(f"\nDatabase Statistics:")
 
-            logger.info(f"\nDatabase Totals:")
-            logger.info(f"  Total products: {total_products:,}")
-            logger.info(f"  Total prices: {total_prices:,}")
-
-            # Show per-chain breakdown
-            logger.info(f"\nPer-chain breakdown:")
             chains = db.query(Chain).all()
             for chain in chains:
                 product_count = db.query(func.count(ChainProduct.chain_product_id))\

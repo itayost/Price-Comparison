@@ -1,4 +1,6 @@
-# price_comparison_server/scripts/import_chain_data.py
+#!/usr/bin/env python3
+# fix_import_chain_data.py
+"""Fixed version of import_chain_data.py that handles empty cities"""
 
 import os
 import sys
@@ -11,7 +13,7 @@ import argparse
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.connection import get_db
-from database.new_models import Chain, Branch, Product, ChainProduct, BranchPrice
+from database.new_models import Chain, Branch, ChainProduct, BranchPrice
 from parsers import get_parser, get_all_parsers, PARSER_REGISTRY
 from sqlalchemy import func
 from datetime import datetime
@@ -23,10 +25,10 @@ logger = logging.getLogger(__name__)
 
 class ChainDataImporter:
     """Main class for importing chain data"""
-    
+
     def __init__(self):
         self.branch_mappings = {}  # Maps store_id to branch_id for each chain
-        
+
     def import_stores(self, chain_name: str, stores: List[Dict[str, Any]]) -> int:
         """Import stores to database"""
         with get_db() as db:
@@ -39,25 +41,45 @@ class ChainDataImporter:
                     chain = Chain(name=chain_name, display_name=chain_name.title())
                     db.add(chain)
                     db.flush()
-                
+
                 imported = 0
                 updated = 0
-                
+                skipped = 0
+
                 # Create mapping for this chain
                 self.branch_mappings[chain_name] = {}
-                
+
                 for store_data in stores:
+                    # FIX: Handle empty city values
+                    city = store_data.get('city', '').strip()
+                    if not city:
+                        # Use store name or address to guess city, or set default
+                        address = store_data.get('address', '').strip()
+                        store_name = store_data.get('store_name', '').strip()
+
+                        # Try to extract city from store name or address
+                        if 'תל אביב' in store_name or 'תל אביב' in address:
+                            city = 'תל אביב'
+                        elif 'ירושלים' in store_name or 'ירושלים' in address:
+                            city = 'ירושלים'
+                        elif 'חיפה' in store_name or 'חיפה' in address:
+                            city = 'חיפה'
+                        else:
+                            # Default city for stores without city info
+                            city = 'לא ידוע'
+                            logger.warning(f"Store {store_data['store_id']} ({store_name}) has no city, using '{city}'")
+
                     # Check if branch exists
                     existing = db.query(Branch).filter(
                         Branch.chain_id == chain.chain_id,
                         Branch.store_id == store_data['store_id']
                     ).first()
-                    
+
                     if existing:
                         # Update existing branch
                         existing.name = store_data['store_name']
-                        existing.address = store_data['address']
-                        existing.city = store_data['city']
+                        existing.address = store_data.get('address', '')
+                        existing.city = city
                         updated += 1
                         self.branch_mappings[chain_name][store_data['store_id']] = existing.branch_id
                     else:
@@ -66,23 +88,25 @@ class ChainDataImporter:
                             chain_id=chain.chain_id,
                             store_id=store_data['store_id'],
                             name=store_data['store_name'],
-                            address=store_data['address'],
-                            city=store_data['city']
+                            address=store_data.get('address', ''),
+                            city=city
                         )
                         db.add(branch)
                         db.flush()
                         imported += 1
                         self.branch_mappings[chain_name][store_data['store_id']] = branch.branch_id
-                
+
                 db.commit()
                 logger.info(f"{chain_name}: Imported {imported} new stores, updated {updated} existing stores")
+                if skipped > 0:
+                    logger.warning(f"Skipped {skipped} stores due to missing required data")
                 return imported + updated
-                
+
             except Exception as e:
                 logger.error(f"Error importing stores: {e}")
                 db.rollback()
                 return 0
-    
+
     def import_prices(self, chain_name: str, prices: List[Dict[str, Any]]) -> int:
         """Import prices to database"""
         with get_db() as db:
@@ -92,62 +116,56 @@ class ChainDataImporter:
                 if not chain:
                     logger.error(f"Chain '{chain_name}' not found")
                     return 0
-                
+
                 # Process in batches
                 batch_size = 1000
                 total_products = 0
                 total_prices = 0
-                
+
                 for i in range(0, len(prices), batch_size):
                     batch = prices[i:i + batch_size]
-                    
+
                     for price_data in batch:
                         # Get or create chain product
                         chain_product = db.query(ChainProduct).filter(
                             ChainProduct.chain_id == chain.chain_id,
                             ChainProduct.barcode == price_data['barcode']
                         ).first()
-                        
+
                         if not chain_product:
-                            # Create new chain product
                             chain_product = ChainProduct(
                                 chain_id=chain.chain_id,
                                 barcode=price_data['barcode'],
-                                name=price_data['name'],
-                                product_id=None  # Will be matched later
+                                name=price_data.get('name', f"Product {price_data['barcode']}")
                             )
                             db.add(chain_product)
                             db.flush()
                             total_products += 1
-                        
-                        # Get branch_id from mapping
-                        branch_id = price_data.get('branch_id')
-                        if not branch_id:
-                            continue
-                        
-                        # Update or create price
-                        existing_price = db.query(BranchPrice).filter(
-                            BranchPrice.chain_product_id == chain_product.chain_product_id,
-                            BranchPrice.branch_id == branch_id
-                        ).first()
-                        
-                        if existing_price:
-                            existing_price.price = price_data['price']
-                            existing_price.last_updated = datetime.utcnow()
-                        else:
-                            branch_price = BranchPrice(
-                                chain_product_id=chain_product.chain_product_id,
-                                branch_id=branch_id,
-                                price=price_data['price']
-                            )
-                            db.add(branch_price)
-                        
-                        total_prices += 1
-                    
-                    # Commit batch
-                    db.commit()
-                    logger.info(f"Processed batch {i//batch_size + 1}, total prices: {total_prices}")
-                
+
+                        # Get branch
+                        branch_id = self.branch_mappings.get(chain_name, {}).get(price_data['store_id'])
+                        if branch_id:
+                            # Create or update price
+                            branch_price = db.query(BranchPrice).filter(
+                                BranchPrice.chain_product_id == chain_product.chain_product_id,
+                                BranchPrice.branch_id == branch_id
+                            ).first()
+
+                            if branch_price:
+                                branch_price.price = price_data['price']
+                                branch_price.last_updated = datetime.utcnow()
+                            else:
+                                branch_price = BranchPrice(
+                                    chain_product_id=chain_product.chain_product_id,
+                                    branch_id=branch_id,
+                                    price=price_data['price'],
+                                    last_updated=datetime.utcnow()
+                                )
+                                db.add(branch_price)
+
+                            total_prices += 1
+
+                db.commit()
                 logger.info(f"{chain_name}: Created {total_products} new products, processed {total_prices} prices")
                 return total_prices
                 

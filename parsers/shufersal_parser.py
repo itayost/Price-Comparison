@@ -108,7 +108,7 @@ class ShufersalParser(BaseChainParser):
 
                     store_data = {
                         'store_id': store_id,
-                        'name': self._get_text(store, 'STORENAME', f"Store {store_id}"),
+                        'store_name': self._get_text(store, 'STORENAME', f"Store {store_id}"),
                         'address': self._get_text(store, 'ADDRESS', ''),
                         'city': self._get_text(store, 'CITY', ''),
                     }

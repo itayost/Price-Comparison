@@ -1,215 +1,213 @@
+# price_comparison_server/database/connection.py
+
 import os
-from sqlalchemy import create_engine, event, text
+import logging
+from pathlib import Path
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
-from .new_models import Base
-import logging
+from typing import Generator
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Import models (without Product)
+from .new_models import Base, User, Chain, Branch, ChainProduct, BranchPrice, SavedCart
+
 logger = logging.getLogger(__name__)
 
-# Determine which database to use
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL")
 USE_ORACLE = os.getenv("USE_ORACLE", "false").lower() == "true"
 
+# For Oracle with wallet
+TNS_ADMIN = os.getenv("TNS_ADMIN") or os.getenv("ORACLE_WALLET_DIR", "./wallet")
+
 if USE_ORACLE:
-    logger.info("Using Oracle Autonomous Database")
-    import oracledb
+    # Oracle configuration
+    wallet_dir = Path(TNS_ADMIN).resolve()
+    os.environ['TNS_ADMIN'] = str(wallet_dir)
 
-    # Ensure we're using thin mode
-    oracledb.init_oracle_client = lambda **kwargs: None
+    # Build Oracle connection string
+    ORACLE_USER = os.getenv("ORACLE_USER")
+    ORACLE_PASSWORD = os.getenv("ORACLE_PASSWORD")
+    # Check for both ORACLE_DSN and ORACLE_SERVICE (for compatibility)
+    ORACLE_DSN = os.getenv("ORACLE_DSN") or os.getenv("ORACLE_SERVICE", "champdb_low")
 
-    # Create connection function
-    def oracle_creator():
-        """Create Oracle connection with proper parameters"""
-        wallet_dir = os.path.abspath(os.getenv('ORACLE_WALLET_DIR', './wallet'))
-        username = os.getenv('ORACLE_USER', 'ADMIN')
-        password = os.getenv('ORACLE_PASSWORD')
-        service = os.getenv('ORACLE_SERVICE', 'champdb_low')
-        wallet_password = os.getenv('ORACLE_WALLET_PASSWORD')
+    # Include wallet configuration in connection
+    connect_args = {
+        "config_dir": str(wallet_dir),
+        "wallet_location": str(wallet_dir)
+    }
 
-        # Set TNS_ADMIN
-        os.environ['TNS_ADMIN'] = wallet_dir
+    # Add wallet password if provided
+    wallet_password = os.getenv("ORACLE_WALLET_PASSWORD")
+    if wallet_password:
+        connect_args["wallet_password"] = wallet_password
 
-        if not password:
-            raise Exception("ORACLE_PASSWORD environment variable not set")
-        if not wallet_password:
-            raise Exception("ORACLE_WALLET_PASSWORD environment variable not set")
+    DATABASE_URL = f"oracle+oracledb://{ORACLE_USER}:{ORACLE_PASSWORD}@{ORACLE_DSN}"
 
-        logger.info(f"Connecting to Oracle service: {service}")
-
-        try:
-            conn = oracledb.connect(
-                user=username,
-                password=password,
-                dsn=service,
-                config_dir=wallet_dir,
-                wallet_location=wallet_dir,
-                wallet_password=wallet_password
-            )
-
-            # Set session parameters for better performance
-            cursor = conn.cursor()
-            cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'")
-            cursor.close()
-
-            return conn
-
-        except Exception as e:
-            logger.error(f"Oracle connection failed: {str(e)}")
-            raise
-
-    # Create engine with Oracle-specific settings
-    engine = create_engine(
-        "oracle+oracledb://",
-        creator=oracle_creator,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-        pool_timeout=30,
-        pool_recycle=1800,
-        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
-        # Oracle-specific settings
-        coerce_to_decimal=False,  # Avoid decimal issues
-        arraysize=100,  # Optimize fetch size
-    )
-
+    logger.info(f"Using Oracle database with TNS_ADMIN: {wallet_dir}")
+    logger.info(f"Connecting to DSN: {ORACLE_DSN}")
 else:
-    # PostgreSQL/SQLite configuration
-    DATABASE_URL = os.getenv("DATABASE_URL")
-
-    if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
+    # SQLite/PostgreSQL configuration
     if not DATABASE_URL:
-        DATABASE_URL = "sqlite:///./users.db"
-        logger.warning("No DATABASE_URL found, using SQLite for development")
+        DATABASE_URL = "sqlite:///./price_comparison.db"
+    logger.info(f"Using database: {DATABASE_URL}")
 
-    logger.info(f"Using database: {DATABASE_URL.split('@')[0]}")
+# Create engine
+try:
+    if USE_ORACLE:
+        # Oracle-specific engine configuration with wallet
+        from pathlib import Path
+        wallet_dir = Path(TNS_ADMIN).resolve()
 
-    if "postgresql" in DATABASE_URL:
         engine = create_engine(
             DATABASE_URL,
-            pool_pre_ping=True,
-            pool_size=5,
-            max_overflow=10,
-            pool_timeout=30,
-            pool_recycle=1800,
-            echo=os.getenv("SQL_ECHO", "false").lower() == "true"
+            poolclass=NullPool,  # Disable pooling for Oracle
+            echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+            connect_args={
+                "config_dir": str(wallet_dir),
+                "wallet_location": str(wallet_dir),
+                "wallet_password": os.getenv("ORACLE_WALLET_PASSWORD")
+            }
         )
     else:
-        # SQLite
+        # SQLite/PostgreSQL engine
         engine = create_engine(
             DATABASE_URL,
-            connect_args={"check_same_thread": False},
-            echo=os.getenv("SQL_ECHO", "false").lower() == "true"
+            echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+            connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
         )
+
+    # Test connection
+    with engine.connect() as conn:
+        if USE_ORACLE:
+            result = conn.execute(text("SELECT 1 FROM DUAL"))
+        else:
+            result = conn.execute(text("SELECT 1"))
+        logger.info("✅ Database connection successful!")
+
+except Exception as e:
+    logger.error(f"❌ Database connection failed: {str(e)}")
+    if USE_ORACLE:
+        logger.error(f"TNS_ADMIN is set to: {os.environ.get('TNS_ADMIN')}")
+        logger.error("Make sure wallet files are in the correct location")
+    raise
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
+@contextmanager
+def get_db() -> Generator[Session, None, None]:
+    """Get database session with automatic cleanup"""
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def get_db_session():
+    """FastAPI dependency for database sessions"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def init_db():
-    """Initialize database tables with proper error handling"""
+    """Initialize database tables"""
     try:
         logger.info("Initializing database tables...")
 
         if USE_ORACLE:
-            # For Oracle, create tables in specific order to handle constraints
-            from .new_models import User, Chain, Branch, Product, ChainProduct, BranchPrice, SavedCart
+            logger.info("Using Oracle database...")
 
-            # Drop existing tables if needed (be careful in production!)
+            # Drop tables if requested (careful!)
             if os.getenv("DROP_TABLES", "false").lower() == "true":
                 logger.warning("Dropping existing tables...")
                 Base.metadata.drop_all(bind=engine)
 
-            # Create sequences first (Oracle specific)
+            # Create all tables at once first
+            logger.info("Creating all tables...")
+            Base.metadata.create_all(bind=engine)
+            logger.info("✅ Tables created with SQLAlchemy")
+
+            # Then create sequences that might be missing
             with engine.connect() as conn:
-                sequences = ['user_id_seq', 'chain_id_seq', 'branch_id_seq', 'product_id_seq',
+                sequences = ['user_id_seq', 'chain_id_seq', 'branch_id_seq',
                            'chain_product_id_seq', 'price_id_seq', 'cart_id_seq']
+
                 for seq in sequences:
                     try:
                         conn.execute(text(f"CREATE SEQUENCE {seq}"))
                         logger.info(f"Created sequence: {seq}")
                     except Exception as e:
                         if "ORA-00955" in str(e):  # Sequence already exists
-                            logger.info(f"Sequence {seq} already exists")
+                            logger.debug(f"Sequence {seq} already exists")
                         else:
-                            logger.error(f"Error creating sequence {seq}: {str(e)}")
+                            logger.warning(f"Could not create sequence {seq}: {e}")
                 conn.commit()
 
-            # Create tables in order
-            logger.info("Creating User table...")
-            User.__table__.create(bind=engine, checkfirst=True)
-
-            logger.info("Creating Chain table...")
-            Chain.__table__.create(bind=engine, checkfirst=True)
-
-            logger.info("Creating Branch table...")
-            Branch.__table__.create(bind=engine, checkfirst=True)
-
-            logger.info("Creating Product table...")
-            Product.__table__.create(bind=engine, checkfirst=True)
-
-            logger.info("Creating ChainProduct table...")
-            ChainProduct.__table__.create(bind=engine, checkfirst=True)
-
-            logger.info("Creating BranchPrice table...")
-            BranchPrice.__table__.create(bind=engine, checkfirst=True)
-
-            logger.info("Creating SavedCart table...")
-            SavedCart.__table__.create(bind=engine, checkfirst=True)
-
+            # Verify tables were created
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT COUNT(*) FROM user_tables WHERE table_name IN ('CHAINS', 'BRANCHES', 'USERS')"))
+                count = result.scalar()
+                if count > 0:
+                    logger.info(f"✅ Verified {count} tables exist in Oracle")
+                else:
+                    logger.error("❌ No tables found after creation!")
         else:
             # For PostgreSQL/SQLite, use normal creation
             Base.metadata.create_all(bind=engine)
+            logger.info("✅ Tables created for non-Oracle database")
 
         logger.info("✅ Database tables initialized successfully!")
 
-        # Test connection
-        with engine.connect() as conn:
-            if USE_ORACLE:
-                result = conn.execute(text("SELECT 1 FROM DUAL"))
-            else:
-                result = conn.execute(text("SELECT 1"))
-            logger.info(f"✅ Database connection test passed: {result.scalar()}")
+        # Seed initial data
+        with get_db() as db:
+            seed_chains(db)
 
     except Exception as e:
-        logger.error(f"❌ Error initializing database: {str(e)}")
+        logger.error(f"❌ Failed to initialize database: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise
 
-@contextmanager
-def get_db():
-    """Database session context manager with error handling"""
-    db = SessionLocal()
+
+def seed_chains(db: Session):
+    """Seed initial chain data if not exists"""
     try:
-        yield db
+        chains = [
+            Chain(name='shufersal', display_name='שופרסל'),
+            Chain(name='victory', display_name='ויקטורי')
+        ]
+
+        for chain in chains:
+            existing = db.query(Chain).filter_by(name=chain.name).first()
+            if not existing:
+                db.add(chain)
+                logger.info(f"Added chain: {chain.name}")
+
         db.commit()
+        logger.info("✅ Initial chain data seeded!")
+
     except Exception as e:
-        logger.error(f"Database error: {str(e)}")
+        logger.error(f"Error seeding chains: {str(e)}")
         db.rollback()
-        raise
-    finally:
-        db.close()
 
-def get_db_session() -> Session:
-    """Get database session for FastAPI dependency injection"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-# Add event listener for Oracle session optimization
-if USE_ORACLE:
-    @event.listens_for(engine, "connect")
-    def set_oracle_session_params(dbapi_conn, connection_record):
-        """Set Oracle session parameters for better performance"""
-        cursor = dbapi_conn.cursor()
-        cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'")
-        cursor.execute("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF'")
-        cursor.close()
+# Only initialize when run directly
+if __name__ == "__main__":
+    print("Initializing database...")
+    init_db()
+    print("Database initialization complete!")

@@ -1,20 +1,11 @@
-# price_comparison_server/main.py
+# main.py
+"""Main FastAPI application with automatic database setup"""
 
+import os
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import logging
-import os
-
-# Initialize database
-from database.connection import init_db
-
-# Import routers
-from routes.cart_routes import router as cart_router
-from routes.auth_routes import router as auth_router
-from routes.saved_carts_routes import router as saved_carts_router
-from routes.system_routes import router as system_router
-from routes.product_routes import router as product_router
 
 # Configure logging
 logging.basicConfig(
@@ -23,71 +14,95 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Import database startup
+from database.startup import ensure_database_ready
 
-# Define lifespan event handler
+# Import routers
+from routes import auth_routes, cart_routes, product_routes, saved_carts_routes, system_routes
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events"""
     # Startup
+    logger.info("🚀 Starting Price Comparison Server...")
+
     try:
-        if os.getenv("TESTING") != "true":  # Skip for tests
-            init_db()
-            logger.info("Database initialized successfully")
+        # Ensure database is ready
+        health = ensure_database_ready()
+
+        if not health['has_data']:
+            logger.warning("⚠️  Server starting without price data!")
+            logger.warning("   API will work but price comparisons will return no results")
+            logger.warning("   Run import scripts or set AUTO_IMPORT=true in .env")
+
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"❌ Startup failed: {e}")
+        # Decide if you want to fail or continue
+        # raise  # Uncomment to prevent server start on DB issues
 
-    yield  # Server runs
+    yield
 
-    # Shutdown (if needed)
-    logger.info("Shutting down...")
+    # Shutdown
+    logger.info("👋 Shutting down Price Comparison Server...")
 
 
-# Create FastAPI app with lifespan
+# Create FastAPI app
 app = FastAPI(
     title="Price Comparison API",
-    description="Compare grocery prices across Israeli supermarket chains",
+    description="Compare grocery prices across different supermarket chains in Israel",
     version="2.0.0",
-    lifespan=lifespan  # Use lifespan instead of on_event
+    lifespan=lifespan
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
-app.include_router(cart_router)
-app.include_router(auth_router)
-app.include_router(saved_carts_router)
-app.include_router(system_router)
-app.include_router(product_router)
+app.include_router(auth_routes.router)
+app.include_router(cart_routes.router)
+app.include_router(product_routes.router)
+app.include_router(saved_carts_routes.router)
+app.include_router(system_routes.router)
 
+# Root endpoint
 @app.get("/")
-def root():
-    """Root endpoint"""
+async def root():
+    """Root endpoint with API information"""
     return {
         "message": "Price Comparison API",
         "version": "2.0.0",
-        "endpoints": {
-            "cart": "/api/cart",
-            "auth": "/api/auth",
-            "products": "/api/products",
-            "saved-carts": "/api/saved-carts",
-            "system": "/api/system",
-            "docs": "/docs",
-            "redoc": "/redoc"
-        }
+        "docs": "/docs",
+        "health": "/api/system/health"
     }
 
+# Health check endpoint
 @app.get("/health")
-def health_check():
-    """Health check endpoint"""
+async def health_check():
+    """Basic health check"""
     return {"status": "healthy"}
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    # Get configuration from environment
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    reload = os.getenv("RELOAD", "true").lower() == "true"
+
+    logger.info(f"Starting server on {host}:{port}")
+
+    # Run the application
+    uvicorn.run(
+        "main:app",
+        host=host,
+        port=port,
+        reload=reload
+    )

@@ -1,7 +1,8 @@
-from .new_models import Base, User, SavedCart, Chain, Branch, ChainProduct, BranchPrice, Product
-from .connection import engine, get_db, init_db, get_db_session
+# Import only the essential items to avoid circular imports
+from .new_models import Base, User, SavedCart, Chain, Branch, ChainProduct, BranchPrice
+from .connection import engine, get_db, get_db_session
 
 __all__ = [
-    'Base', 'User', 'SavedCart', 'Chain', 'Branch', 'ChainProduct', 'BranchPrice', 'Product',
-    'engine', 'get_db', 'init_db', 'get_db_session'
+    'Base', 'User', 'SavedCart', 'Chain', 'Branch', 'ChainProduct', 'BranchPrice',
+    'engine', 'get_db', 'get_db_session'
 ]
