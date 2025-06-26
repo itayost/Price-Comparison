@@ -310,7 +310,9 @@ python scripts/import_chain_data.py --chain newchain
 
 ## 📄 License
 
-This project is part of a university assignment. Please check with your institution for usage rights.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+Copyright (c) 2024 Yarin Manoah, Itay Ostraich
 
 ## 🤝 Contributing
 
@@ -319,9 +321,13 @@ This project is part of a university assignment. Please check with your institut
 3. Run tests before committing
 4. Submit a pull request
 
-## 📞 Support
+## 📞 Contact
 
-For issues and questions:
+For questions, suggestions, or issues:
+- Yarin Manoah - yarinmanoah1443@gmail.com
+- Itay Ostraich - itayost1@gmail.com
+
+You can also:
 - Check the `/docs` endpoint for API documentation
 - Review test files for usage examples
 - Open an issue on the repository
