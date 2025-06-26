@@ -22,7 +22,10 @@ class TestBasicFunctionality:
         data = response.json()
         assert data["message"] == "Price Comparison API"
         assert data["version"] == "2.0.0"
-        assert "endpoints" in data
+        assert "docs" in data
+        assert data["docs"] == "/docs"
+        assert "health" in data
+        assert data["health"] == "/api/system/health"
 
 
 class TestMainFeatures:
