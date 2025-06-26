@@ -1,120 +1,331 @@
 # Price Comparison Server
 
-This server provides APIs to search and compare prices across different supermarket chains in Israel, currently supporting Shufersal and Victory.
+A modern REST API server for comparing grocery prices across major supermarket chains in Israel. Built with FastAPI and designed for scalability with support for both SQLite and Oracle Autonomous Database.
 
-## Latest Improvements (v1.1)
+## 🚀 Features
 
-The server has been updated with significant improvements to the price comparison functionality:
+### Core Functionality
+- **Real-time Price Comparison**: Compare product prices across Shufersal and Victory stores
+- **Smart Cart Optimization**: Find the cheapest store for your entire shopping cart
+- **Location-Based Search**: Search products and stores by city
+- **Barcode Search**: Look up products using exact barcodes
+- **Price Statistics**: View min/max/average prices and potential savings
 
-1. **Enhanced Price Comparison**: Improved algorithm for finding the cheapest cart across stores
-2. **Better Product Matching**: More accurate product identification across different chains
-3. **Cross-Chain Product Identification**: Properly identifies identical products by item code
-4. **Improved Search Results**: Better balance of results between different chains
-5. **Savings Calculation**: Shows how much you're saving compared to other stores
-6. **More Detailed Response**: Includes item-level price information for better transparency
+### User Features
+- **User Authentication**: JWT-based secure authentication
+- **Saved Shopping Carts**: Save and manage multiple shopping lists
+- **Cart History**: Track your shopping patterns over time
 
-## Refactoring Improvements (v1.0)
+### Technical Features
+- **RESTful API**: Clean, documented API endpoints
+- **Database Flexibility**: Supports SQLite (development) and Oracle (production)
+- **Automated Data Import**: Scrape and import price data from supermarket websites
+- **Comprehensive Testing**: Full test suite with pytest
+- **API Documentation**: Auto-generated Swagger/OpenAPI docs at `/docs`
 
-The code has been extensively refactored to improve maintainability and organization:
+## 📋 Requirements
 
-1. **Modular Structure**: Separated monolithic app into logical modules
-2. **Better Abstraction**: Isolated business logic from API routes
-3. **Improved Testing**: Added test script to verify functionality
-4. **Enhanced Documentation**: Better comments and README file
-5. **Cleaner Code**: Smaller functions with single responsibilities
-6. **Improved Imports**: Organized imports to follow Python best practices
-7. **Enhanced Error Handling**: Added more meaningful error messages
+- Python 3.10+
+- SQLite (for development) or Oracle Autonomous Database (for production)
+- 4GB+ RAM recommended for data import operations
 
-## Project Structure
+## 🛠️ Installation
 
-The project has been organized into a modular structure for better maintainability:
+### 1. Clone the Repository
+```bash
+git clone <repository-url>
+cd price_comparison_server
+```
+
+### 2. Create Virtual Environment
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+### 3. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Environment Configuration
+
+Create a `.env` file in the project root:
+
+```env
+# Basic Configuration
+SECRET_KEY=your-secret-key-here-change-in-production
+HOST=0.0.0.0
+PORT=8000
+
+# Database Configuration
+USE_ORACLE=false  # Set to true for Oracle
+DATABASE_URL=sqlite:///./price_comparison.db
+
+# Oracle Configuration (if USE_ORACLE=true)
+ORACLE_USER=ADMIN
+ORACLE_PASSWORD=your-oracle-password
+ORACLE_SERVICE=champdb_low
+ORACLE_WALLET_DIR=./wallet
+ORACLE_WALLET_PASSWORD=your-wallet-password
+
+# Import Configuration
+AUTO_IMPORT=false  # Set to true to import data on startup
+IMPORT_LIMIT=0     # Limit files during import (0 = no limit)
+
+# Development
+RELOAD=true
+SQL_ECHO=false
+TESTING=false
+```
+
+## 🚀 Quick Start
+
+### Option 1: Run with Automatic Setup
+```bash
+python main.py
+```
+The server will automatically:
+- Initialize the database
+- Create necessary tables
+- Start the API server
+- (Optional) Import data if `AUTO_IMPORT=true`
+
+### Option 2: Manual Setup
+```bash
+# 1. Initialize database
+python database/connection.py
+
+# 2. Import store data
+python scripts/import_chain_data.py --stores-only
+
+# 3. Import price data
+python scripts/import_prices.py --limit 10  # Start with 10 files for testing
+
+# 4. Start the server
+python main.py
+```
+
+## 📚 API Documentation
+
+Once the server is running, visit:
+- **Interactive API Docs**: http://localhost:8000/docs
+- **API Schema**: http://localhost:8000/openapi.json
+
+### Key Endpoints
+
+#### Authentication
+- `POST /api/auth/register` - Register new user
+- `POST /api/auth/login` - Login and receive JWT token
+- `GET /api/auth/me` - Get current user info
+
+#### Product Search
+- `GET /api/products/search?query=חלב&city=תל אביב` - Search products
+- `GET /api/products/barcode/{barcode}?city=תל אביב` - Get product by barcode
+- `GET /api/products/cities` - List all available cities
+- `GET /api/products/chains` - List all supermarket chains
+
+#### Cart Comparison
+- `POST /api/cart/compare` - Compare cart prices across all stores
+- `GET /api/cart/sample` - Get a sample cart for testing
+
+#### Saved Carts
+- `POST /api/saved-carts/save` - Save a shopping cart
+- `GET /api/saved-carts/list` - List user's saved carts
+- `GET /api/saved-carts/{cart_id}` - Get cart details
+- `GET /api/saved-carts/{cart_id}/compare` - Compare saved cart prices
+
+#### System
+- `GET /health` - Basic health check
+- `GET /api/system/health/detailed` - Detailed system status
+- `GET /api/system/statistics` - Database statistics
+
+## 🗄️ Database Schema
+
+The system uses a normalized database design:
+
+### Core Tables
+- **chains**: Supermarket chains (Shufersal, Victory)
+- **branches**: Store locations with addresses
+- **chain_products**: Products specific to each chain
+- **branch_prices**: Current prices at each branch
+
+### User Tables
+- **users**: Registered users with hashed passwords
+- **saved_carts**: User's saved shopping lists
+
+## 🔧 Data Import
+
+The system includes parsers for scraping price data from supermarket websites:
+
+### Import All Data
+```bash
+# Import both chains
+python scripts/import_chain_data.py
+python scripts/import_prices.py
+```
+
+### Import Specific Chain
+```bash
+# Import only Shufersal
+python scripts/import_chain_data.py --chain shufersal
+python scripts/import_prices.py --chain shufersal --limit 5
+```
+
+### Import Progress
+The import process shows detailed progress:
+- Number of stores imported
+- Products created/updated
+- Prices imported
+- Errors encountered
+
+## 🧪 Testing
+
+Run the comprehensive test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=. --cov-report=html
+
+# Run specific test file
+pytest tests/test_api.py -v
+
+# Run specific test
+pytest tests/test_api.py::TestMainFeatures::test_search_products -v
+```
+
+## 🏗️ Project Structure
 
 ```
 price_comparison_server/
-├── models/             # Data models
-│   ├── __init__.py
-│   ├── user_models.py  # Authentication models
-│   └── data_models.py  # Price and cart models
+├── database/              # Database models and connection
+│   ├── new_models.py     # SQLAlchemy models
+│   ├── connection.py     # Database setup
+│   └── startup.py        # Initialization logic
 │
-├── routes/                  # API route definitions
-│   ├── __init__.py
-│   ├── auth_routes.py           # Authentication endpoints
-│   ├── price_routes.py          # Original price comparison endpoints
-│   ├── price_routes_new.py      # Refactored price comparison endpoints
-│   ├── price_routes_improved.py # Enhanced price comparison endpoints (v1.1)
-│   └── cart_routes.py           # Cart management endpoints
+├── routes/               # API endpoints
+│   ├── auth_routes.py    # Authentication
+│   ├── product_routes.py # Product search
+│   ├── cart_routes.py    # Cart comparison
+│   └── saved_carts_routes.py
 │
-├── services/           # Business logic
-│   ├── __init__.py
-│   └── search_service.py  # Product search implementation
+├── services/             # Business logic
+│   ├── auth_service.py   # Authentication
+│   ├── cart_service.py   # Cart comparison
+│   └── product_search_service.py
 │
-├── utils/              # Helper utilities
-│   ├── __init__.py
-│   ├── auth_utils.py   # Authentication helpers
-│   ├── db_utils.py     # Database utilities
-│   └── product_utils.py # Product data processing
+├── parsers/              # Data scrapers
+│   ├── base_parser.py    # Abstract parser
+│   ├── shufersal_parser.py
+│   └── victory_parser.py
 │
-├── api_server.py          # Original monolithic server (for backward compatibility)
-├── api_server_refactored.py # New modular server with enhanced price comparison (v1.1)
-├── server.py           # Scraping utilities
-├── users.db            # User and cart database
+├── scripts/              # Utility scripts
+│   ├── import_chain_data.py
+│   └── import_prices.py
 │
-├── shufersal_prices/   # Shufersal price databases
-└── victory_prices/     # Victory price databases
+├── tests/               # Test suite
+├── main.py             # Application entry point
+└── requirements.txt    # Dependencies
 ```
 
-## Running the Server
+## 🚀 Deployment
 
-The easiest way to run the server is using the provided run script:
-
+### Local Network Access
+To access from mobile devices on the same network:
 ```bash
-# Activate the virtual environment
-cd "/Users/itay/Desktop/Academy/Champion Cart/price_comparison_server"
-source venv/bin/activate
-
-# Run the original monolithic server
-python run_server.py
-
-# Run the enhanced server with improved price comparison (recommended)
-python run_server.py --refactored
-
-# Optionally specify a custom port
-python run_server.py --port=8080
+python main.py  # Server runs on 0.0.0.0:8000
 ```
+Access via: `http://YOUR_IP:8000`
 
-**Note: For the best price comparison results, we strongly recommend using the refactored server with the `--refactored` flag, which includes our enhanced algorithms for finding the cheapest cart.**
+### Production Deployment
 
-Alternatively, you can use uvicorn directly:
+#### Oracle Cloud Setup
+1. Create Oracle Autonomous Database
+2. Download wallet files to `./wallet`
+3. Configure `.env` with Oracle credentials
+4. Set `USE_ORACLE=true`
 
+#### Railway Deployment
+The project includes `railway.json` for easy deployment:
 ```bash
-# Run the original monolithic server
-uvicorn api_server:app --host 0.0.0.0 --reload
-
-# Run the refactored server
-python -m uvicorn api_server_refactored:app --host 0.0.0.0 --reload
+railway up
 ```
 
-Note: The server is configured to listen on all network interfaces (0.0.0.0) to make it accessible from mobile devices on the same network.
+## 🛠️ Development
 
-The `--host 0.0.0.0` flag is important to make the server accessible from mobile devices on the same network.
+### Adding a New Supermarket Chain
 
-## Main Features
+1. Create a new parser in `parsers/`:
+```python
+# parsers/newchain_parser.py
+from .base_parser import BaseChainParser
 
-1. **Price Comparison**: Search for products and compare prices across Shufersal and Victory
-2. **Shopping Cart**: Save and retrieve shopping carts
-3. **User Authentication**: Register and login users
-4. **Price Per Unit**: Calculate price per unit (g, ml) for better comparison
+class NewChainParser(BaseChainParser):
+    def __init__(self):
+        super().__init__('newchain', 'chain_code')
+        # Implementation...
+```
 
-## API Endpoints
+2. Register in `parsers/__init__.py`:
+```python
+from .newchain_parser import NewChainParser
+PARSER_REGISTRY['newchain'] = NewChainParser
+```
 
-- `/prices/by-item/{city}/{item_name}` - Search for products by name in a specific city
-- `/cheapest-cart-all-chains` - Find the cheapest store for a specific cart
-- `/savedcarts/{email}` - Retrieve saved carts for a user
-- `/savecart` - Save a cart for a user
-- `/register` and `/login` - User authentication
+3. Add to database:
+```python
+python scripts/import_chain_data.py --chain newchain
+```
 
-## Troubleshooting Tips
+### API Development
+- FastAPI auto-reloads on code changes
+- Test new endpoints at `/docs`
+- Use Pydantic models for request/response validation
 
-1. If search returns no Victory items, check if city name matches exactly
-2. For better results, use specific product names rather than generic terms
-3. Check database connectivity if errors occur
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **No products found**: Ensure data is imported:
+   ```bash
+   python scripts/import_chain_data.py
+   python scripts/import_prices.py --limit 5
+   ```
+
+2. **Database locked (SQLite)**: Ensure only one process accesses the database
+
+3. **City not found**: Check exact spelling:
+   ```bash
+   curl http://localhost:8000/api/products/cities
+   ```
+
+4. **Oracle connection fails**: Verify wallet files in `./wallet` directory
+
+### Logs
+- Check console output for detailed error messages
+- Set `SQL_ECHO=true` in `.env` for SQL query debugging
+
+## 📄 License
+
+This project is part of a university assignment. Please check with your institution for usage rights.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests before committing
+4. Submit a pull request
+
+## 📞 Support
+
+For issues and questions:
+- Check the `/docs` endpoint for API documentation
+- Review test files for usage examples
+- Open an issue on the repository
+
+---
+
+**Note**: This system is designed for educational purposes and real-world price comparison in Israel. Price data must be regularly updated for accurate comparisons.
